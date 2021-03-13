@@ -56,13 +56,14 @@
 #include "lpsTdoa2Tag.h"
 #include "lpsTdoa3Tag.h"
 #include "lpsTwrTag.h"
-
+#include "uwbp2pdist.h"
+#include "uwbTwrp2p.h"
 
 #define CS_PIN DECK_GPIO_IO1
 
 // LOCO deck alternative IRQ and RESET pins(IO_2, IO_3) instead of default (RX1, TX1), leaving UART1 free for use
 #ifdef LOCODECK_USE_ALT_PINS
-  #define GPIO_PIN_IRQ 	  DECK_GPIO_IO2
+  #define GPIO_PIN_IRQ 	  	DECK_GPIO_IO2
 
   #ifndef LOCODECK_ALT_PIN_RESET
   #define GPIO_PIN_RESET 	DECK_GPIO_IO3
@@ -70,17 +71,17 @@
   #define GPIO_PIN_RESET 	LOCODECK_ALT_PIN_RESET
   #endif
 
-  #define EXTI_PortSource EXTI_PortSourceGPIOB
+  #define EXTI_PortSource 	EXTI_PortSourceGPIOB
   #define EXTI_PinSource 	EXTI_PinSource5
-  #define EXTI_LineN 		  EXTI_Line5
-  #define EXTI_IRQChannel EXTI9_5_IRQn
+  #define EXTI_LineN 		EXTI_Line5
+  #define EXTI_IRQChannel 	EXTI9_5_IRQn
 #else
-  #define GPIO_PIN_IRQ 	  DECK_GPIO_RX1
+  #define GPIO_PIN_IRQ 	  	DECK_GPIO_RX1
   #define GPIO_PIN_RESET 	DECK_GPIO_TX1
-  #define EXTI_PortSource EXTI_PortSourceGPIOC
+  #define EXTI_PortSource 	EXTI_PortSourceGPIOC
   #define EXTI_PinSource 	EXTI_PinSource11
-  #define EXTI_LineN 		  EXTI_Line11
-  #define EXTI_IRQChannel EXTI15_10_IRQn
+  #define EXTI_LineN 		EXTI_Line11
+  #define EXTI_IRQChannel 	EXTI15_10_IRQn
 #endif
 
 
@@ -99,15 +100,25 @@ static lpsAlgoOptions_t algoOptions = {
   .userRequestedMode = lpsMode_TDoA2,
 #elif LPS_TDOA3_ENABLE
   .userRequestedMode = lpsMode_TDoA3,
+//#elif LPS_P2P_ENABLE
+//  .userRequestedMode = lpsMode_P2P,
+#elif LPS_TWRP2P_ENABLE
+  .userRequestedMode = lpsMode_TWRP2P,
 #elif defined(LPS_TWR_ENABLE)
   .userRequestedMode = lpsMode_TWR,
 #else
-  .userRequestedMode = lpsMode_auto,
+  //.userRequestedMode = lpsMode_P2P,
+  .userRequestedMode = lpsMode_TWRP2P,
+  //.userRequestedMode = lpsMode_TWR,
+  //.userRequestedMode = lpsMode_auto,
 #endif
   // .currentRangingMode is the currently running algorithm, available as a log
   // lpsMode_auto is an impossible mode which forces initialization of the requested mode
   // at startup
-  .currentRangingMode = lpsMode_auto,
+  //.currentRangingMode = lpsMode_P2P,
+  .userRequestedMode = lpsMode_TWRP2P,
+  //.userRequestedMode = lpsMode_TWR,
+  //.userRequestedMode = lpsMode_auto,
   .modeAutoSearchActive = true,
   .modeAutoSearchDoInitialize = true,
 };
@@ -119,14 +130,22 @@ struct {
   [lpsMode_TWR] = {.algorithm = &uwbTwrTagAlgorithm, .name="TWR"},
   [lpsMode_TDoA2] = {.algorithm = &uwbTdoa2TagAlgorithm, .name="TDoA2"},
   [lpsMode_TDoA3] = {.algorithm = &uwbTdoa3TagAlgorithm, .name="TDoA3"},
+ // [lpsMode_P2P] = {.algorithm = &uwbP2PDistAlgorithm, .name="P2P"},
+  [lpsMode_TWRP2P] = {.algorithm = &uwbTWRP2PAlgorithm, .name="TWRP2P"},
 };
 
 #if LPS_TDOA_ENABLE
 static uwbAlgorithm_t *algorithm = &uwbTdoa2TagAlgorithm;
 #elif LPS_TDOA3_ENABLE
 static uwbAlgorithm_t *algorithm = &uwbTdoa3TagAlgorithm;
+//#elif LPS_P2P_ENABLE
+//static uwbAlgorithm_t *algorithm = &uwbP2PDistAlgorithm;
+#elif LPS_TWRP2P_ENABLE
+static uwbAlgorithm_t *algorithm = &uwbTWRP2PAlgorithm;
 #else
-static uwbAlgorithm_t *algorithm = &uwbTwrTagAlgorithm;
+//static uwbAlgorithm_t *algorithm = &uwbTwrTagAlgorithm;
+static uwbAlgorithm_t *algorithm = uwbTWRP2PAlgorithm;
+//static uwbAlgorithm_t *algorithm = &uwbP2PDistAlgorithm;
 #endif
 
 static bool isInit = false;
@@ -168,16 +187,21 @@ static void buildAnchorMemList(const uint32_t memAddr, const uint8_t readLen, ui
 
 static void txCallback(dwDevice_t *dev)
 {
+	//DEBUG_PRINT("3/txCallback\n");
   timeout = algorithm->onEvent(dev, eventPacketSent);
+  //DEBUG_PRINT("eventPacketSent_timeout = %d\r\n",(unsigned int)timeout);
 }
 
 static void rxCallback(dwDevice_t *dev)
 {
+	//DEBUG_PRINT("3/rxCallback\n");
   timeout = algorithm->onEvent(dev, eventPacketReceived);
+  //DEBUG_PRINT("eventPacketReceived_timeout = %d\r\n",(unsigned int)timeout);
 }
 
 static void rxTimeoutCallback(dwDevice_t * dev) {
   timeout = algorithm->onEvent(dev, eventReceiveTimeout);
+  //DEBUG_PRINT("eventReceiveTimeout_timeout = %d\r\n",(unsigned int)timeout);
 }
 
 static bool handleMemRead(const uint32_t memAddr, const uint8_t readLen, uint8_t* dest) {
@@ -303,7 +327,9 @@ static void autoModeSearchTryMode(const lpsMode_t newMode, const uint32_t now) {
 static lpsMode_t autoModeSearchGetNextMode() {
   lpsMode_t newMode = algoOptions.currentRangingMode + 1;
   if (newMode > LPS_NUMBER_OF_ALGORITHMS) {
-    newMode = lpsMode_TWR;
+	 // newMode = lpsMode_TWR;
+	  //newMode = lpsMode_P2P;
+	  newMode = lpsMode_TWRP2P;
   }
 
   return newMode;
@@ -351,9 +377,10 @@ static void handleModeSwitch() {
 
 static void uwbTask(void* parameters) {
   lppShortQueue = xQueueCreate(10, sizeof(lpsLppShortPacket_t));
-
-  algoOptions.currentRangingMode = lpsMode_auto;
-
+////////////////////////////////////////////////////////////////
+  //algoOptions.currentRangingMode = lpsMode_P2P;
+  algoOptions.currentRangingMode = lpsMode_TWRP2P;
+  //algoOptions.currentRangingMode = lpsMode_TWR;
   systemWaitStart();
 
   while(1) {
@@ -361,13 +388,18 @@ static void uwbTask(void* parameters) {
     handleModeSwitch();
     xSemaphoreGive(algoSemaphore);
 
-    if (ulTaskNotifyTake(pdTRUE, timeout / portTICK_PERIOD_MS) > 0) {
+    //DEBUG_PRINT("1/ulTaskNotifyTake = %ld,timeout = %ld\r\n",ulTaskNotifyTake(pdTRUE, timeout / portTICK_PERIOD_MS),timeout);
+    if(ulTaskNotifyTake(pdTRUE, timeout / portTICK_PERIOD_MS) > 0 ) {
+    	//DEBUG_PRINT("in-if\r\n");
+    	//DEBUG_PRINT("2/ulTaskNotifyTake = %ld,timeout = %ld\r\n",ulTaskNotifyTake(pdTRUE, timeout / portTICK_PERIOD_MS),timeout);
       do{
+    	//DEBUG_PRINT("digitalRead = %d\r\n",(unsigned int)digitalRead(GPIO_PIN_IRQ));
         xSemaphoreTake(algoSemaphore, portMAX_DELAY);
         dwHandleInterrupt(dwm);
         xSemaphoreGive(algoSemaphore);
       } while(digitalRead(GPIO_PIN_IRQ) != 0);
     } else {
+    	//DEBUG_PRINT("in-else\r\n");
       xSemaphoreTake(algoSemaphore, portMAX_DELAY);
       timeout = algorithm->onEvent(dwm, eventTimeout);
       xSemaphoreGive(algoSemaphore);
