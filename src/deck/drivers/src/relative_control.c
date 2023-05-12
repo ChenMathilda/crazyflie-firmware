@@ -2,6 +2,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "commander.h"
+#include "relative_control.h"
 #include "relative_localization.h"
 #include "ranging_struct.h"
 #include "num.h"
@@ -9,10 +10,13 @@
 #include "debug.h"
 #include <stdlib.h> // random
 #include "configblock.h"
+#include "uart1_dma_task.h"
 #include "uart2.h"
 #include "log.h"
 #include "math.h"
 #include "adhocdeck.h"
+#define DEBUG_MODULE "CTRL"
+#include "debug.h"
 
 static uint16_t MY_UWB_ADDRESS;
 static bool isInit;
@@ -44,12 +48,57 @@ static void setHoverSetpoint(setpoint_t *setpoint, float vx, float vy, float z, 
   setpoint->velocity_body = true;
   commanderSetSetpoint(setpoint, 3);
 }
-
-static void flyRandomIn1meter(void)
+static float steerAngle;
+static float collision;
+float signFromation = 0.5f;
+static float_t Yaw;
+static float_t Vel;
+latest3_data_t latest3_data = {{0.0f, 0.0f, 0.0f,0.0f, 0.0f}, {0.0f, 0.0f, 0.0f,0.0f, 0.0f}, {0.5f, 0.5f, 0.5f,0.5f, 0.5f}, 0};
+float calAveOf3(float *data)
 {
-  float_t randomYaw = (rand() / (float)RAND_MAX) * 6.28f; // 0-2pi rad
-  float_t randomVel = (rand() / (float)RAND_MAX) * 1;     // 0-1 m/s
-  float_t vxBody = randomVel * cosf(randomYaw);           // 速度分解
+  float sum = 0.0;
+  for(int i = 0; i < histSize; i++)
+    sum += data[i];
+  return (sum / histSize);
+}
+float calLatest5Signal(float *data)
+{
+  float sum = 0.0;
+  for(int i = 0; i < histSize; i++)
+    sum += data[i];
+
+  if(sum <= 1)
+    return -1.0f;
+  else if(sum > 1&&sum <= 4)
+    return 0.0f;
+  else
+    return 1.0f;
+}
+
+static bool processHistoryData(float *steerAngle, float *collision, float *signFromation)
+{
+  // update history data
+  latest3_data.steer_ctl[latest3_data.index] = *steerAngle;
+  latest3_data.coll_ctl[latest3_data.index] = *collision;
+  latest3_data.sign_ctl[latest3_data.index] = *signFromation;
+  latest3_data.index = (latest3_data.index + 1) % histSize;
+  if (latest3_data.index == 0)
+  {
+    // calculate average
+    *steerAngle = calAveOf3(latest3_data.steer_ctl);
+    *collision = calAveOf3(latest3_data.coll_ctl);
+    *signFromation = calLatest5Signal(latest3_data.sign_ctl);
+    DEBUG_PRINT("steerAngle:%.2f \tcollision:%.2f \tsignFromation: %.2f\n", *steerAngle, *collision, *signFromation);
+    return true;
+  }
+  return false;
+}
+
+static void flyRandomIn1meter(float_t randomVel)
+{
+  float_t randomYaw = (rand() / (float)RAND_MAX) * 3.14f; // 0-2pi rad
+  // float_t randomVel = (rand() / (float)RAND_MAX) * 1;     // 0-1 m/s
+  float_t vxBody = randomVel * cosf(randomYaw); // 速度分解
   float_t vyBody = randomVel * sinf(randomYaw);
   for (int i = 1; i < 100; i++)
   {
@@ -65,6 +114,19 @@ static void flyRandomIn1meter(void)
   }
 }
 
+static void flyRandomByAIResult(float steerAngle, float collision, float ai_height)
+{
+
+  Yaw = ((1 - beta) * steerAngle + beta * (PI / 3) * steerAngle);
+  Vel = (1 - alpha) * Vel + alpha * (1 - collision) * velMax;
+  DEBUG_PRINT("after Filter-Yaw:%.2f\tVel:%.2f\n", Yaw, Vel);
+  for (int i = 1; i < 100; i++)
+  {
+    setHoverSetpoint(&setpoint, Vel, 0, ai_height, Yaw);
+    vTaskDelay(M2T(10));
+  }
+}
+
 #define SIGN(a) ((a >= 0) ? 1 : -1)
 static float_t targetX;
 static float_t targetY;
@@ -73,13 +135,13 @@ static float PreErr_y = 0;
 static float IntErr_x = 0;
 static float IntErr_y = 0;
 static uint32_t PreTime;
-static void formation0asCenter(float_t tarX, float_t tarY)
+static void formation0asCenter(float_t tarX, float_t tarY,float_t ai_height)
 {
   float dt = (float)(xTaskGetTickCount() - PreTime) / configTICK_RATE_HZ;
   PreTime = xTaskGetTickCount();
   if (dt > 1) // skip the first run of the EKF
     return;
-  // pid control for formation flight
+  // pid control for formation flight 当前是1号无人机
   float err_x = -(tarX - relaVarInCtrl[0][STATE_rlX]);
   float err_y = -(tarY - relaVarInCtrl[0][STATE_rlY]);
   float pid_vx = relaCtrl_p * err_x;  // 2.0*err_x 基于距离差进行一个速度控制
@@ -113,7 +175,7 @@ static void formation0asCenter(float_t tarX, float_t tarY)
   // pid_vx = constrain(pid_vx + rep_x, -1.5f, 1.5f);
   // pid_vy = constrain(pid_vy + rep_y, -1.5f, 1.5f);
 
-  setHoverSetpoint(&setpoint, pid_vx, pid_vy, height, 0);
+  setHoverSetpoint(&setpoint, pid_vx, pid_vy, ai_height, 0);
 }
 
 void take_off()
@@ -123,11 +185,11 @@ void take_off()
     setHoverSetpoint(&setpoint, 0, 0, height, 0);
     vTaskDelay(M2T(100));
   }
-  for (int i = 0; i < 10 * MY_UWB_ADDRESS; i++)
-  {
-    setHoverSetpoint(&setpoint, 0, 0, height, 0);
-    vTaskDelay(M2T(100));
-  }
+  // for (int i = 0; i < 10 * MY_UWB_ADDRESS; i++)
+  // {
+  //   setHoverSetpoint(&setpoint, 0, 0, height, 0);
+  //   vTaskDelay(M2T(100));
+  // }
   onGround = false;
 }
 
@@ -215,7 +277,7 @@ void reset_estimators()
 
 void relativeControlTask(void *arg)
 {
-  static const float_t targetList[7][STATE_DIM_rl] = {{0.0f, 0.0f, 0.0f}, {-1.0f, 0.5f, 0.0f}, {-1.0f, -0.5f, 0.0f}, {-1.0f, -1.5f, 0.0f}, {0.0f, -1.0f, 0.0f}, {0.0f, -1.0f, 0.0f}, {-2.0f, 0.0f, 0.0f}};
+  static const float_t targetList[7][STATE_DIM_rl] = {{0.0f, 0.0f, 0.0f}, {-0.5f, -0.5f, 0.0f}, {-1.13f, 0.82f, 0.0f}, {0.43f, 1.33f, 0.0f}, {1.4f, 0.0f, 0.0f}, {0.43f, -1.33f, 0.0f}, {1.5f, 1.5f, 0.0f}};
   systemWaitStart();
   reset_estimators(); // 判断无人机数值是否收敛
 
@@ -237,43 +299,54 @@ void relativeControlTask(void *arg)
 
       // control loop
       tickInterval = xTaskGetTickCount() - takeoff_tick;
-      DEBUG_PRINT("tick:%d,rlx:%f,rly:%f,rlraw:%f\n", tickInterval, relaVarInCtrl[0][STATE_rlX], relaVarInCtrl[0][STATE_rlY], relaVarInCtrl[0][STATE_rlYaw]);
-      if (tickInterval <= 25000)
+      // DEBUG_PRINT("tick:%d,rlx:%f,rly:%f,rlraw:%f\n", tickInterval, relaVarInCtrl[1][STATE_rlX], relaVarInCtrl[1][STATE_rlY], relaVarInCtrl[1][STATE_rlYaw]);
+      // DEBUG_PRINT("tick:%f\n", relaVarInCtrl[0][STATE_rlYaw]);
+      if (tickInterval <= 5000)
       {
 
-        flyRandomIn1meter(); // random flight within first 10 seconds
+        float_t randomVel = 0.3;      // 0-1 m/s
+        flyRandomIn1meter(randomVel); // random flight within first 10 seconds
         targetX = relaVarInCtrl[0][STATE_rlX];
         targetY = relaVarInCtrl[0][STATE_rlY];
       }
       else
       {
-
-        if ((tickInterval > 25000) && (tickInterval <= 50000))
-        { // 0-random, other formation
-          if (MY_UWB_ADDRESS == 0)
-          {
-            flyRandomIn1meter();
-          }
-          else
-          {
-            formation0asCenter(targetX, targetY);
-          }
-          // NDI_formation0asCenter(targetX, targetY);
-        }
-        else if ((tickInterval > 50000) && (tickInterval <= 70000))
+        if ((tickInterval > 5000) && (tickInterval <= 15000))
         {
           if (MY_UWB_ADDRESS == 0)
           {
-            flyRandomIn1meter();
+            float_t randomVel = 0.3;
+            flyRandomIn1meter(randomVel);
+          }
+          else
+          {
+            formation0asCenter(targetX, targetY,height);
+          }
+          // NDI_formation0asCenter(targetX, targetY);
+        }
+        else if ((tickInterval > 15000) && (tickInterval <= 90000))
+        {
+          if (MY_UWB_ADDRESS == 0)
+          {
+            // float_t randomVel = (rand() / (float)RAND_MAX) * 1;     // 0-1 m/s
+            // flyRandomIn1meter(randomVel);
+            if (get0AiStateInfo(&steerAngle, &collision, &signFromation) && processHistoryData(&steerAngle, &collision, &signFromation))
+            {
+              flyRandomByAIResult(steerAngle, collision, height);
+            }
+            else
+            {
+              flyRandomByAIResult(0, 0.5, height);
+            }
           }
           else
           {
             targetX = -cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlX] + sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlY];
             targetY = -sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlX] - cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlY];
-            formation0asCenter(targetX, targetY);
+            formation0asCenter(targetX, targetY,height);
           }
         }
-        else if (tickInterval > 70000 && tickInterval <= 90000)
+        else if (tickInterval > 90000 && tickInterval <= 100000)
         {
           if (MY_UWB_ADDRESS == 0)
           {
@@ -281,7 +354,7 @@ void relativeControlTask(void *arg)
           }
           else
           {
-            formation0asCenter(targetX, targetY);
+            formation0asCenter(targetX, targetY,height);
           }
         }
         else

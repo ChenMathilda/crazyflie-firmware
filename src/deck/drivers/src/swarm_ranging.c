@@ -14,6 +14,9 @@
 #include "ranging_struct.h"
 #include "swarm_ranging.h"
 #include "estimator_kalman.h"
+#include "uart1_dma_task.h"
+#define DEBUG_MODULE "SWARM"
+#include "debug.h"
 
 static uint16_t MY_UWB_ADDRESS;
 /*--5添加--*/
@@ -33,12 +36,25 @@ static int rangingSeqNumber = 1;
 static logVarId_t idVelocityX, idVelocityY, idVelocityZ;
 /*--6添加--*/
 static float velocity;
+static uint32_t generate_tick;
+static uint32_t tickInterval;
+
+// for AI///////////////////////
+typedef struct
+{
+  float steer;
+  float coll;
+  float sign;
+} aideck_control_t;
+aideck_control_t aideck_control = {0.0f, 0.0f, 0.5f};
+// for AI///////////////////////
 
 int16_t distanceTowards[RANGING_TABLE_SIZE + 1] = {[0 ... RANGING_TABLE_SIZE] = -1};
 
 /*--4添加--*/
 static neighborStateInfo_t neighborStateInfo; // 邻居的状态信息
 static bool my_keep_flying;                   // 当前无人机的keep_flying
+static uint8_t leader_address = 0;
 
 void initNeighborStateInfoAndMedian_data()
 {
@@ -58,9 +74,16 @@ void setNeighborStateInfo(uint16_t neighborAddress, int16_t distance, Ranging_Me
   neighborStateInfo.velocityYInWorld[neighborAddress] = rangingMessageHeader->velocityYInWorld;
   neighborStateInfo.gyroZ[neighborAddress] = rangingMessageHeader->gyroZ;
   neighborStateInfo.positionZ[neighborAddress] = rangingMessageHeader->positionZ;
+  // for AI///////////////////////TODO Just need neighborAddress==0
+  neighborStateInfo.steer = rangingMessageHeader->steer;
+  neighborStateInfo.coll = rangingMessageHeader->coll;
+  neighborStateInfo.sign = rangingMessageHeader->sign;
+
+  // DEBUG_PRINT("setNeighborStateInfo:steer:%.2f,coll:%.2f,sign:%.2f\n", neighborStateInfo.steer, neighborStateInfo.coll, neighborStateInfo.sign);
+  // for AI///////////////////////
   neighborStateInfo.refresh[neighborAddress] = true;
-  if (neighborAddress == 1)
-  { /*无人机的keep_flying都是由0号无人机来设置的*/
+  if (neighborAddress == leader_address)
+  { /* 无人机的keep_flying都是由0号无人机来设置的 */
     my_keep_flying = rangingMessageHeader->keep_flying;
   }
 }
@@ -100,10 +123,20 @@ bool getNeighborStateInfo(uint16_t neighborAddress, uint16_t *distance, short *v
     return false;
   }
 }
-
+bool get0AiStateInfo(float *steer, float *coll, float *sign)
+{
+  *steer = neighborStateInfo.steer;
+  *coll = neighborStateInfo.coll;
+  *sign = neighborStateInfo.sign;
+  // DEBUG_PRINT("get0AiStateInfo:steer:%.2f,coll:%.2f,sign:%.2f\n", *steer, *coll, *sign);
+  // memset(&neighborStateInfo.steer, 0, sizeof(float));
+  // memset(*coll, 0, sizeof(float));
+  // memset(&neighborStateInfo.sign, 0.5, sizeof(float));
+  return true;
+}
 bool getOrSetKeepflying(uint16_t uwbAddress, bool keep_flying)
 {
-  if (uwbAddress == 1)
+  if (uwbAddress == leader_address)
   {
     my_keep_flying = keep_flying;
     return keep_flying;
@@ -205,9 +238,10 @@ static void uwbRangingTxTask(void *parameters)
 
   UWB_Packet_t txPacketCache;
   txPacketCache.header.type = RANGING;
-  //  txPacketCache.header.mac = ? TODO init mac header
+  //  txPacketCache.header.mac = ? TODO init mac header 
   while (true)
   {
+  
     int msgLen = generateRangingMessage((Ranging_Message_t *)&txPacketCache.payload);
     txPacketCache.header.length = sizeof(Packet_Header_t) + msgLen;
     uwbSendPacketBlock(&txPacketCache);
@@ -479,15 +513,39 @@ int generateRangingMessage(Ranging_Message_t *rangingMessage)
   velocity = sqrt(pow(velocityX, 2) + pow(velocityY, 2) + pow(velocityZ, 2));
   /* velocity in cm/s */
   rangingMessage->header.velocity = (short)(velocity * 100);
-
   estimatorKalmanGetSwarmInfo(&rangingMessage->header.velocityXInWorld, &rangingMessage->header.velocityYInWorld, &rangingMessage->header.gyroZ, &rangingMessage->header.positionZ);
+  // for AI///////////////////////////just need when MY_UWB_ADDRESS==0
+  if (MY_UWB_ADDRESS == 0)
+  {
+    if (uwbGetUartInfo(&aideck_control.steer, &aideck_control.coll, &aideck_control.sign)) // 获取到了AIdeck控制信息
+    {
+      rangingMessage->header.steer = aideck_control.steer;
+      rangingMessage->header.coll = aideck_control.coll;
+      rangingMessage->header.sign = aideck_control.sign;
+    }
+    // else // 没有获取到AIdeck控制信息
+    // {
+    //   rangingMessage->header.steer = 0.0;
+    //   // rangingMessage->header.coll = aideck_control.coll;
+    //   rangingMessage->header.sign = 0.5;
+    // }
+    // DEBUG_PRINT("generate0:steer=%.2f, coll=%.2f, sign=%.2f\n", rangingMessage->header.steer, rangingMessage->header.coll, rangingMessage->header.sign);
+  }
+  else if (MY_UWB_ADDRESS != 0)
+  {
+    rangingMessage->header.steer = neighborStateInfo.steer;
+    rangingMessage->header.coll = neighborStateInfo.coll;
+    rangingMessage->header.sign = neighborStateInfo.sign;
+    // DEBUG_PRINT("generate!0:steer=%.2f, coll=%.2f, sign=%.2f\n", rangingMessage->header.steer, rangingMessage->header.coll, rangingMessage->header.sign);
+  }
+  // for AI///////////////////////////
   rangingMessage->header.keep_flying = my_keep_flying;
-
   /*--9添加--*/
   return rangingMessage->header.msgLength;
 }
 
 LOG_GROUP_START(Ranging)
+LOG_ADD(LOG_INT16, distTo0, distanceTowards + 0)
 LOG_ADD(LOG_INT16, distTo1, distanceTowards + 1)
 LOG_ADD(LOG_INT16, distTo2, distanceTowards + 2)
 LOG_ADD(LOG_INT16, distTo3, distanceTowards + 3)
@@ -498,3 +556,9 @@ LOG_ADD(LOG_INT16, distTo7, distanceTowards + 7)
 LOG_ADD(LOG_INT16, distTo8, distanceTowards + 8)
 LOG_ADD(LOG_INT16, distTo8, distanceTowards + 9)
 LOG_GROUP_STOP(Ranging)
+
+LOG_GROUP_START(AIdeck_control)
+LOG_ADD(LOG_FLOAT, Steer, &aideck_control.steer)
+LOG_ADD(LOG_FLOAT, Coll, &aideck_control.coll)
+LOG_ADD(LOG_FLOAT, Sign, &aideck_control.sign)
+LOG_GROUP_STOP(AIdeck_control)

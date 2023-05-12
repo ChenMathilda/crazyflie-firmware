@@ -192,7 +192,6 @@ bool uart1GetDataWithTimeout(uint8_t *c, const uint32_t timeoutTicks)
   {
     return true;
   }
-
   *c = 0;
   return false;
 }
