@@ -36,6 +36,7 @@
 #include "config.h"
 #include "console.h"
 #include "uart1.h"
+#include "uart1_dma_task.h"
 #include "uart2.h"
 #include "debug.h"
 #include "deck.h"
@@ -52,12 +53,13 @@
 #include "queue.h"
 #include "stm32fxxx.h"
 #include "system.h"
-
 #include "aideck.h"
 #include "aideck-router.h"
 
 static bool isInit = false;
 static uint8_t byte;
+
+// #define NINA_ENABLE
 
 #define ESP_TX_QUEUE_LENGTH 4
 #define ESP_RX_QUEUE_LENGTH 4
@@ -70,7 +72,8 @@ static xQueueHandle espRxQueue;
 #define UART_CRC_LENGTH 1
 #define UART_META_LENGTH (UART_HEADER_LENGTH + UART_CRC_LENGTH)
 
-typedef struct {
+typedef struct
+{
   CPXTarget_t destination : 3;
   CPXTarget_t source : 3;
   bool lastPacket : 1;
@@ -78,37 +81,42 @@ typedef struct {
   CPXFunction_t function : 8;
 } __attribute__((packed)) CPXRoutingPacked_t;
 
-typedef struct {
+typedef struct
+{
   uint8_t cmd;
   uint32_t startAddress;
   uint32_t writeSize;
 } __attribute__((packed)) GAP8BlCmdPacket_t;
 
-typedef struct {
+typedef struct
+{
   uint8_t cmd;
 } __attribute__((packed)) ESP32SysPacket_t;
 
 #define GAP8_BL_CMD_START_WRITE (0x02)
-#define GAP8_BL_CMD_MD5         (0x04)
+#define GAP8_BL_CMD_MD5 (0x04)
 
 #define ESP32_SYS_CMD_RESET_GAP8 (0x10)
 
 #define CPX_ROUTING_PACKED_SIZE (sizeof(CPXRoutingPacked_t))
 
-typedef struct {
-    CPXRoutingPacked_t route;
-    uint8_t data[AIDECK_UART_TRANSPORT_MTU - CPX_ROUTING_PACKED_SIZE];
+typedef struct
+{
+  CPXRoutingPacked_t route;
+  uint8_t data[AIDECK_UART_TRANSPORT_MTU - CPX_ROUTING_PACKED_SIZE];
 } __attribute__((packed)) uartTransportPayload_t;
 
-typedef struct {
-    uint8_t start;
-    uint8_t payloadLength; // Excluding start and crc
-    union {
-        uartTransportPayload_t routablePayload;
-        uint8_t payload[AIDECK_UART_TRANSPORT_MTU];
-    };
+typedef struct
+{
+  uint8_t start;
+  uint8_t payloadLength; // Excluding start and crc
+  union
+  {
+    uartTransportPayload_t routablePayload;
+    uint8_t payload[AIDECK_UART_TRANSPORT_MTU];
+  };
 
-    uint8_t crcPlaceHolder; // Not actual position. CRC is added after the last byte of payload
+  uint8_t crcPlaceHolder; // Not actual position. CRC is added after the last byte of payload
 } __attribute__((packed)) uart_transport_packet_t;
 
 // Used when sending/receiving data on the UART
@@ -122,12 +130,15 @@ static EventGroupHandle_t evGroup;
 #define ESP_TXQ_EVENT (1 << 2)
 
 static EventGroupHandle_t bootloaderSync;
-#define CPX_WAIT_FOR_BOOTLOADER_REPLY (1<<0)
+#define CPX_WAIT_FOR_BOOTLOADER_REPLY (1 << 0)
 
-static void assemblePacket(const CPXPacket_t *packet, uart_transport_packet_t * txp);
+static void assemblePacket(const CPXPacket_t *packet, uart_transport_packet_t *txp);
+static float steer;
+static float coll;
+float sign;
 
-
-typedef enum {
+typedef enum
+{
   ESP_MODE_NORMAL,
   ESP_MODE_PREPARE_FOR_BOOTLOADER,
   ESP_MODE_BOOTLOADER,
@@ -139,12 +150,17 @@ const uint32_t espUartReadMaxWait = M2T(100);
 // This function gets data from the UART that is connected to the ESP.
 // The default behavior is to wait until data arrives, but it can be terminated when the ESP is set to boot loader mode.
 // In this case the function will be NOPed and block forever.
-static void getDataFromEspUart(uint8_t *c) {
+static void getDataFromEspUart(uint8_t *c)
+{
   bool readSuccess = false;
-  while(!readSuccess) {
-    if (ESP_MODE_NORMAL == espMode) {
+  while (!readSuccess)
+  {
+    if (ESP_MODE_NORMAL == espMode)
+    {
       readSuccess = uart2GetDataWithTimeout(c, espUartReadMaxWait);
-    } else {
+    }
+    else
+    {
       vTaskDelay(portMAX_DELAY);
     }
   }
@@ -152,18 +168,22 @@ static void getDataFromEspUart(uint8_t *c) {
 
 // This function sends data to the UART that is connected to the ESP.
 // It will be NOPed if the ESP is set in boot loader mode.
-static void sendDataToEspUart(uint32_t size, uint8_t* data) {
-  if (ESP_MODE_NORMAL == espMode) {
+static void sendDataToEspUart(uint32_t size, uint8_t *data)
+{
+  if (ESP_MODE_NORMAL == espMode)
+  {
     uart2SendData(size, data);
   }
 }
 
-static uint8_t calcCrc(const uart_transport_packet_t* packet) {
-  const uint8_t* start = (const uint8_t*) packet;
-  const uint8_t* end = &packet->payload[packet->payloadLength];
+static uint8_t calcCrc(const uart_transport_packet_t *packet)
+{
+  const uint8_t *start = (const uint8_t *)packet;
+  const uint8_t *end = &packet->payload[packet->payloadLength];
 
   uint8_t crc = 0;
-  for (const uint8_t* p = start; p < end; p++) {
+  for (const uint8_t *p = start; p < end; p++)
+  {
     crc ^= *p;
   }
 
@@ -261,7 +281,7 @@ static void ESP_TX(void *param)
           sendDataToEspUart(sizeof(ctr), (uint8_t *)&ctr);
         }
       } while ((evBits & ESP_CTS_EVENT) != ESP_CTS_EVENT);
-      sendDataToEspUart((uint32_t) espTxp.payloadLength + UART_META_LENGTH, (uint8_t *)&espTxp);
+      sendDataToEspUart((uint32_t)espTxp.payloadLength + UART_META_LENGTH, (uint8_t *)&espTxp);
     }
   }
 }
@@ -269,17 +289,24 @@ static void ESP_TX(void *param)
 static void Gap8Task(void *param)
 {
   systemWaitStart();
-  vTaskDelay(M2T(1000));
-
+  vTaskDelay(M2T(100));
+  DEBUG_PRINT("Gap8Task\n");
   // Read out the byte the Gap8 sends and immediately send it to the console.
   while (1)
   {
-    uart1GetDataWithTimeout(&byte, portMAX_DELAY);
-    //consolePutchar(byte);
+     uart1GetDataWithTimeout(&byte, portMAX_DELAY);
+    // consolePutchar(byte);
+    // if (uwbGetUartInfo(&steer, &coll, &sign))
+    // {
+    //   DEBUG_PRINT("steer:%.2f \tcollision:%.2f \t  sign: %.f\n", steer, coll, sign);
+    //   // DEBUG_PRINT("uwbGetUartInfo(&steer, &coll, &sign): %d\n",uwbGetUartInfo(&steer, &coll, &sign));
+      
+    // }
   }
 }
 
-static void assemblePacket(const CPXPacket_t *packet, uart_transport_packet_t * txp) {
+static void assemblePacket(const CPXPacket_t *packet, uart_transport_packet_t *txp)
+{
   ASSERT((packet->route.destination >> 4) == 0);
   ASSERT((packet->route.source >> 4) == 0);
   ASSERT((packet->route.function >> 8) == 0);
@@ -300,7 +327,7 @@ void cpxReceivePacketBlocking(CPXPacket_t *packet)
 
   xQueueReceive(espRxQueue, &cpxRxp, portMAX_DELAY);
 
-  packet->dataLength = (uint32_t) cpxRxp.payloadLength - CPX_ROUTING_PACKED_SIZE;
+  packet->dataLength = (uint32_t)cpxRxp.payloadLength - CPX_ROUTING_PACKED_SIZE;
   packet->route.destination = cpxRxp.routablePayload.route.destination;
   packet->route.source = cpxRxp.routablePayload.route.source;
   packet->route.function = cpxRxp.routablePayload.route.function;
@@ -325,14 +352,16 @@ bool cpxSendPacket(const CPXPacket_t *packet, uint32_t timeout)
   return packetWasSent;
 }
 
-void cpxInitRoute(const CPXTarget_t source, const CPXTarget_t destination, const CPXFunction_t function, CPXRouting_t* route) {
-    route->source = source;
-    route->destination = destination;
-    route->function = function;
-    route->lastPacket = true;
+void cpxInitRoute(const CPXTarget_t source, const CPXTarget_t destination, const CPXFunction_t function, CPXRouting_t *route)
+{
+  route->source = source;
+  route->destination = destination;
+  route->function = function;
+  route->lastPacket = true;
 }
 
-void cpxBootloaderMessage(const CPXPacket_t * packet) {
+void cpxBootloaderMessage(const CPXPacket_t *packet)
+{
   xEventGroupSetBits(bootloaderSync, CPX_WAIT_FOR_BOOTLOADER_REPLY);
 }
 
@@ -342,12 +371,14 @@ static CPXPacket_t bootPacket;
 static uint8_t flashBuffer[FLASH_BUFFER_SIZE];
 static int flashBufferIndex = 0;
 
-static bool gap8DeckFlasherWrite(const uint32_t memAddr, const uint8_t writeLen, const uint8_t *buffer, const DeckMemDef_t* memDef) {
+static bool gap8DeckFlasherWrite(const uint32_t memAddr, const uint8_t writeLen, const uint8_t *buffer, const DeckMemDef_t *memDef)
+{
 
   cpxInitRoute(CPX_T_STM32, CPX_T_GAP8, CPX_F_BOOTLOADER, &bootPacket.route);
 
-  if (memAddr == 0) {
-    GAP8BlCmdPacket_t* gap8BlPacket = (GAP8BlCmdPacket_t*)bootPacket.data;
+  if (memAddr == 0)
+  {
+    GAP8BlCmdPacket_t *gap8BlPacket = (GAP8BlCmdPacket_t *)bootPacket.data;
 
     gap8BlPacket->cmd = GAP8_BL_CMD_START_WRITE;
     gap8BlPacket->startAddress = 0x40000;
@@ -367,7 +398,8 @@ static bool gap8DeckFlasherWrite(const uint32_t memAddr, const uint8_t writeLen,
   memcpy(&flashBuffer[flashBufferIndex], buffer, sizeAbleToBuffer);
   flashBufferIndex += sizeAbleToBuffer;
 
-  if (flashBufferIndex == sizeof(flashBuffer) || lastAddressToWrite == *(memDef->newFwSizeP)) {
+  if (flashBufferIndex == sizeof(flashBuffer) || lastAddressToWrite == *(memDef->newFwSizeP))
+  {
     memcpy(&bootPacket.data, flashBuffer, flashBufferIndex);
     bootPacket.dataLength = flashBufferIndex;
 
@@ -375,40 +407,42 @@ static bool gap8DeckFlasherWrite(const uint32_t memAddr, const uint8_t writeLen,
 
     flashBufferIndex = 0;
     int sizeLeftToBuffer = writeLen - sizeLeftToBufferFull;
-    if (sizeLeftToBuffer > 0) {
+    if (sizeLeftToBuffer > 0)
+    {
       memcpy(&flashBuffer[flashBufferIndex], &buffer[sizeLeftToBufferFull], sizeLeftToBuffer);
       flashBufferIndex += sizeLeftToBuffer;
     }
   }
 
-  if (memAddr + writeLen == *(memDef->newFwSizeP)) {
+  if (memAddr + writeLen == *(memDef->newFwSizeP))
+  {
     // Request the MD5 checksum of the flashed data. This is only done
     // for synchronizing and making sure everything has been written,
     // we do not care about the results.
-    GAP8BlCmdPacket_t* gap8BlPacket = (GAP8BlCmdPacket_t*)bootPacket.data;
+    GAP8BlCmdPacket_t *gap8BlPacket = (GAP8BlCmdPacket_t *)bootPacket.data;
     gap8BlPacket->cmd = GAP8_BL_CMD_MD5;
     gap8BlPacket->startAddress = 0x40000;
     gap8BlPacket->writeSize = *(memDef->newFwSizeP);
     bootPacket.dataLength = sizeof(GAP8BlCmdPacket_t);
     cpxSendPacketBlocking(&bootPacket);
-    
+
     xEventGroupWaitBits(bootloaderSync,
                         CPX_WAIT_FOR_BOOTLOADER_REPLY,
                         pdTRUE,  // Clear bits before returning
                         pdFALSE, // Wait for any bit
                         portMAX_DELAY);
-}
+  }
 
   return true;
 }
 
-
 static bool isGap8InBootloaderMode = false;
 
-static void resetGap8ToBootloader() {
+static void resetGap8ToBootloader()
+{
   cpxInitRoute(CPX_T_STM32, CPX_T_ESP32, CPX_F_SYSTEM, &bootPacket.route);
 
-  ESP32SysPacket_t* esp32SysPacket = (ESP32SysPacket_t*)bootPacket.data;
+  ESP32SysPacket_t *esp32SysPacket = (ESP32SysPacket_t *)bootPacket.data;
 
   esp32SysPacket->cmd = ESP32_SYS_CMD_RESET_GAP8;
   bootPacket.dataLength = sizeof(ESP32SysPacket_t);
@@ -423,18 +457,21 @@ static uint8_t gap8DeckFlasherPropertiesQuery()
 {
   uint8_t result = 0;
 
-  if (isInit) {
+  if (isInit)
+  {
     result |= DECK_MEMORY_MASK_STARTED;
   }
 
-  if (isGap8InBootloaderMode) {
+  if (isGap8InBootloaderMode)
+  {
     result |= DECK_MEMORY_MASK_BOOT_LOADER_ACTIVE;
   }
 
   return result;
 }
 
-static void resetEspToBootloader() {
+static void resetEspToBootloader()
+{
   espMode = ESP_MODE_PREPARE_FOR_BOOTLOADER;
 
   // Give the UART some time to terminate any pending operations
@@ -477,28 +514,29 @@ uint8_t espDeckFlasherPropertiesQuery()
   return result;
 }
 
-
-
 static void aideckInit(DeckInfo *info)
 {
   if (isInit)
     return;
+  uart1Init(115200);
 
+  xTaskCreate(uartRxTask, AI_DECK_DMA_TASK_NAME, UART_RX_TASK_STACKSIZE, NULL,
+              UART1_TEST_TASK_PRI, NULL);
   // Initialize task for the GAP8
   xTaskCreate(Gap8Task, AI_DECK_GAP_TASK_NAME, AI_DECK_TASK_STACKSIZE, NULL,
               AI_DECK_TASK_PRI, NULL);
 
+  // Pull reset for GAP8/ESP32
+  pinMode(DECK_GPIO_IO4, OUTPUT);
+  digitalWrite(DECK_GPIO_IO4, LOW);
+
+#ifdef NINA_ENABLE
   espTxQueue = xQueueCreate(ESP_TX_QUEUE_LENGTH, sizeof(CPXPacket_t));
   espRxQueue = xQueueCreate(ESP_RX_QUEUE_LENGTH, sizeof(uart_transport_packet_t));
 
   evGroup = xEventGroupCreate();
   bootloaderSync = xEventGroupCreate();
-
-  // Pull reset for GAP8/ESP32
-  pinMode(DECK_GPIO_IO4, OUTPUT);
-  digitalWrite(DECK_GPIO_IO4, LOW);
-  //Initialize UARTs while GAP8/ESP32 is held in reset
-  uart1Init(115200);
+  // Initialize UARTs while GAP8/ESP32 is held in reset
   uart2Init(115200);
 
   // Initialize task for the ESP while it's held in reset
@@ -506,15 +544,14 @@ static void aideckInit(DeckInfo *info)
               AI_DECK_TASK_PRI, NULL);
   xTaskCreate(ESP_TX, AIDECK_ESP_TX_TASK_NAME, AI_DECK_TASK_STACKSIZE, NULL,
               AI_DECK_TASK_PRI, NULL);
-
-  // Release reset for GAP8/ESP32
-  digitalWrite(DECK_GPIO_IO4, HIGH);
-  pinMode(DECK_GPIO_IO4, INPUT_PULLUP);
-
   aideckRouterInit();
 
   // Make sure a full CPX packet can be stored in the UART2 RX buffer
   ASSERT(UART2_RX_QUEUE_LENGTH > sizeof(uart_transport_packet_t));
+#endif
+  // Release reset for GAP8/ESP32
+  digitalWrite(DECK_GPIO_IO4, HIGH);
+  pinMode(DECK_GPIO_IO4, INPUT_PULLUP);
 
   isInit = true;
 }
@@ -568,7 +605,7 @@ LOG_ADD(LOG_UINT8, receivebyte, &byte)
 LOG_GROUP_STOP(aideck)
 
 /** @addtogroup deck
-*/
+ */
 PARAM_GROUP_START(deck)
 
 /**

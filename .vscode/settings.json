@@ -5,6 +5,7 @@
         "**/bower_components": true
     },
     "files.associations": {
+        "*.py": "python",
         "*.cjson": "jsonc",
         "*.wxss": "css",
         "*.wxs": "javascript",
@@ -15,7 +16,17 @@
         "relative_localization.h": "c",
         "iterator": "c",
         "ranging_struct.h": "c",
+<<<<<<< HEAD
         "adhocdeck.h": "c"
     },
     "editor.fontSize": 18
+=======
+        "adhocdeck.h": "c",
+        "aideck.h": "c",
+        "uart1_dma.h": "c",
+        "uart1.h": "c",
+        "uart1_dma_task.h": "c",
+        "relative_control.h": "c"
+    }
+>>>>>>> 62381d59
 }

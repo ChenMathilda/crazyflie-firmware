@@ -2,6 +2,7 @@
 #define _SWARM_RANGING_H_
 #include "adhocdeck.h"
 #include "ranging_struct.h"
+#include "uart1_dma_task.h"
 
 /* Function Switch */
 #define ENABLE_BUS_BOARDING_SCHEME
@@ -37,10 +38,15 @@ typedef struct
     short velocityYInWorld[RANGING_TABLE_SIZE + 1];   // 2byte cm/s 在世界坐标系下的速度（不是机体坐标系）
     float gyroZ[RANGING_TABLE_SIZE + 1];              // 4 byte rad/s
     uint16_t positionZ[RANGING_TABLE_SIZE + 1];       // 2 byte cm/s
+// for AI///////////////////////
+    float steer;              // rad [-1,1]
+    float coll;               //[0,1]
+    float sign;               //[0,1]
+// for AI///////////////////////
     bool refresh[RANGING_TABLE_SIZE + 1];             // 当前信息从上次EKF获取，到现在是否更新
     bool isNewAdd[RANGING_TABLE_SIZE + 1];            // 这个邻居是否是新加入的
     bool isNewAddUsed[RANGING_TABLE_SIZE + 1];
-    /* 用于辅助判断这个邻居是否是新加入的（注意：这里的'新加入'指的是，是相对于EKF来说的，主要用于在EKF中判断是否需要执行初始化工作）*/
+    /* 用于辅助判断这个邻居是否是新加入的（注意：这里的'新加入'指的是，是相对于EKF来说的，主要用于在EKF中判断是否需要执行初始化工作）*/    
 } neighborStateInfo_t; /*存储正在和本无人机进行通信的邻居的所有信息（用于EKF）*/
 
 typedef struct
@@ -71,7 +77,8 @@ void setNeighborStateInfo_isNewAdd(uint16_t neighborAddress, bool isNewAddNeighb
 
 /*get邻居的状态信息*/
 bool getNeighborStateInfo(uint16_t neighborAddress, uint16_t *distance, short *vx, short *vy, float *gyroZ, uint16_t *height, bool *isNewAddNeighbor);
-
+/*get邻居AI预测结果*/
+bool get0AiStateInfo(float *steer, float *coll, float *sign);
 /*getOrSetKeepflying*/
 bool getOrSetKeepflying(uint16_t RobIDfromControl, bool keep_flying);
 

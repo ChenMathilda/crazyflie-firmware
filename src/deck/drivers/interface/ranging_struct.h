@@ -43,6 +43,11 @@ typedef struct
   uint16_t positionZ;     // 2 byte cm/s
   bool keep_flying;       // 无人机的飞行状态
   /*--1添加--*/
+// for AI///////////////////////
+  float steer;
+  float coll;
+  float sign; 
+// for AI///////////////////////
   uint16_t msgLength;                               // 2 byte
   uint16_t filter;                                  // 16 bits bloom filter
 } __attribute__((packed)) Ranging_Message_Header_t; // 20 byte
