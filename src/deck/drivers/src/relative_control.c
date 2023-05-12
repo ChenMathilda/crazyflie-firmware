@@ -67,11 +67,6 @@ float calLatest5Signal(float *data)
   for(int i = 0; i < histSize; i++)
     sum += data[i];
 
-<<<<<<< HEAD
-static void flyRandomIn1meter(float_t randomVel)
-{
-  float_t randomYaw = (rand() / (float)RAND_MAX) * 6.28f; // 0-2pi rad
-=======
   if(sum <= 1)
     return -1.0f;
   else if(sum > 1&&sum <= 4)
@@ -102,7 +97,6 @@ static bool processHistoryData(float *steerAngle, float *collision, float *signF
 static void flyRandomIn1meter(float_t randomVel)
 {
   float_t randomYaw = (rand() / (float)RAND_MAX) * 3.14f; // 0-2pi rad
->>>>>>> 62381d59
   // float_t randomVel = (rand() / (float)RAND_MAX) * 1;     // 0-1 m/s
   float_t vxBody = randomVel * cosf(randomYaw); // 速度分解
   float_t vyBody = randomVel * sinf(randomYaw);
@@ -283,11 +277,7 @@ void reset_estimators()
 
 void relativeControlTask(void *arg)
 {
-<<<<<<< HEAD
-  static const float_t targetList[7][STATE_DIM_rl] = {{0.0f, 0.0f, 0.0f}, {-1.13f, -0.82f, 0.0f}, {-1.13f, 0.82f, 0.0f}, {0.43f, 1.33f, 0.0f}, {1.4f, 0.0f, 0.0f}, {0.43f, -1.33f, 0.0f}, {1.5f, 1.5f, 0.0f}};
-=======
   static const float_t targetList[7][STATE_DIM_rl] = {{0.0f, 0.0f, 0.0f}, {-0.5f, -0.5f, 0.0f}, {-1.13f, 0.82f, 0.0f}, {0.43f, 1.33f, 0.0f}, {1.4f, 0.0f, 0.0f}, {0.43f, -1.33f, 0.0f}, {1.5f, 1.5f, 0.0f}};
->>>>>>> 62381d59
   systemWaitStart();
   reset_estimators(); // 判断无人机数值是否收敛
 
