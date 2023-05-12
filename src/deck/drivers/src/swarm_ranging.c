@@ -85,12 +85,8 @@ int16_t distanceTowards[RANGING_TABLE_SIZE + 1] = {[0 ... RANGING_TABLE_SIZE] = 
 /*--4添加--*/
 static neighborStateInfo_t neighborStateInfo; // 邻居的状态信息
 static bool my_keep_flying;                   // 当前无人机的keep_flying
-<<<<<<< HEAD
-static uint16_t leder_address=0;
-=======
 static uint8_t leader_address = 0;
 
->>>>>>> 62381d59
 void initNeighborStateInfoAndMedian_data()
 {
   for (int i = 0; i < RANGING_TABLE_SIZE + 1; i++)
@@ -119,20 +115,15 @@ void setNeighborStateInfo(uint16_t neighborAddress, int16_t distance, Ranging_Me
   // DEBUG_PRINT("setNeighborStateInfo:steer:%.2f,coll:%.2f,sign:%.2f\n", neighborStateInfo.steer, neighborStateInfo.coll, neighborStateInfo.sign);
   // for AI///////////////////////
   neighborStateInfo.refresh[neighborAddress] = true;
-<<<<<<< HEAD
-  if (neighborAddress == leder_address)
-  { /*无人机的keep_flying都是由0号无人机来设置的*/
-=======
   if (neighborAddress == leader_address)
   { /* 无人机的keep_flying都是由0号无人机来设置的 */
->>>>>>> 62381d59
     my_keep_flying = rangingMessageHeader->keep_flying;
   }
 }
 
 bool getOrSetKeepflying(uint16_t uwbAddress, bool keep_flying)
 {
-  if (uwbAddress == leder_address)
+  if (uwbAddress == leader_address)
   {
     my_keep_flying = keep_flying;
     return keep_flying;
@@ -178,10 +169,6 @@ bool getNeighborStateInfo(uint16_t neighborAddress, uint16_t *distance, short *v
     return false;
   }
 }
-<<<<<<< HEAD
-
-
-=======
 bool get0AiStateInfo(float *steer, float *coll, float *sign)
 {
   *steer = neighborStateInfo.steer;
@@ -193,19 +180,6 @@ bool get0AiStateInfo(float *steer, float *coll, float *sign)
   // memset(&neighborStateInfo.sign, 0.5, sizeof(float));
   return true;
 }
-bool getOrSetKeepflying(uint16_t uwbAddress, bool keep_flying)
-{
-  if (uwbAddress == leader_address)
-  {
-    my_keep_flying = keep_flying;
-    return keep_flying;
-  }
-  else
-  {
-    return my_keep_flying;
-  }
-}
->>>>>>> 62381d59
 
 void getCurrentNeighborAddressInfo_t(currentNeighborAddressInfo_t *currentNeighborAddressInfo)
 {
