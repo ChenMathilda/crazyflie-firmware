@@ -523,8 +523,8 @@ static void aideckInit(DeckInfo *info)
   xTaskCreate(uartRxTask, AI_DECK_DMA_TASK_NAME, UART_RX_TASK_STACKSIZE, NULL,
               UART1_TEST_TASK_PRI, NULL);
   // Initialize task for the GAP8
-  xTaskCreate(Gap8Task, AI_DECK_GAP_TASK_NAME, AI_DECK_TASK_STACKSIZE, NULL,
-              AI_DECK_TASK_PRI, NULL);
+  // xTaskCreate(Gap8Task, AI_DECK_GAP_TASK_NAME, AI_DECK_TASK_STACKSIZE, NULL,
+  //             AI_DECK_TASK_PRI, NULL);
 
   // Pull reset for GAP8/ESP32
   pinMode(DECK_GPIO_IO4, OUTPUT);

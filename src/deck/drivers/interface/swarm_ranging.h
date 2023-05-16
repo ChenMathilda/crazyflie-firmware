@@ -78,7 +78,7 @@ void setNeighborStateInfo_isNewAdd(uint16_t neighborAddress, bool isNewAddNeighb
 /*get邻居的状态信息*/
 bool getNeighborStateInfo(uint16_t neighborAddress, uint16_t *distance, short *vx, short *vy, float *gyroZ, uint16_t *height, bool *isNewAddNeighbor);
 /*get邻居AI预测结果*/
-bool get0AiStateInfo(float *steer, float *coll, float *sign);
+uint8_t get0AiStateInfo(float *steer, float *coll, float *sign);
 /*getOrSetKeepflying*/
 bool getOrSetKeepflying(uint16_t RobIDfromControl, bool keep_flying);
 

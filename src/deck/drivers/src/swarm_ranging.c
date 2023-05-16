@@ -44,8 +44,8 @@ static tx_rv_interval_history_t tx_rv_interval_history[RANGING_TABLE_SIZE + 1]; 
 static uint8_t tx_rv_interval[RANGING_TABLE_SIZE + 1] = {0};
 static uint8_t nextTransportPeriod = TX_PERIOD_IN_MS; // 发送数据包周期
 
-static uint8_t dist_count=0;
-static uint8_t dist_correct =0;
+static uint8_t dist_count = 0;
+static uint8_t dist_correct = 0;
 
 static uint8_t test_0_index;
 static uint32_t test_0_lastRv;
@@ -76,8 +76,8 @@ typedef struct
   float steer;
   float coll;
   float sign;
-} aideck_control_t;
-aideck_control_t aideck_control = {0.0f, 0.0f, 0.5f};
+} aideck_data_t;
+aideck_data_t aideck_data = {0.0f, 0.0f, 0.0f};
 // for AI///////////////////////
 
 int16_t distanceTowards[RANGING_TABLE_SIZE + 1] = {[0 ... RANGING_TABLE_SIZE] = -1};
@@ -152,7 +152,7 @@ void setNeighborStateInfo_isNewAdd(uint16_t neighborAddress, bool isNewAddNeighb
 
 bool getNeighborStateInfo(uint16_t neighborAddress, uint16_t *distance, short *vx, short *vy, float *gyroZ, uint16_t *height, bool *isNewAddNeighbor)
 {
-  if (neighborStateInfo.refresh[neighborAddress] == true&&my_keep_flying==true)
+  if (neighborStateInfo.refresh[neighborAddress] == true && my_keep_flying == true)
   {
     neighborStateInfo.refresh[neighborAddress] = false;
     *distance = neighborStateInfo.distanceTowards[neighborAddress];
@@ -169,16 +169,24 @@ bool getNeighborStateInfo(uint16_t neighborAddress, uint16_t *distance, short *v
     return false;
   }
 }
-bool get0AiStateInfo(float *steer, float *coll, float *sign)
+static uint8_t get_times;
+uint8_t get0AiStateInfo(float *steer, float *coll, float *sign)
 {
-  *steer = neighborStateInfo.steer;
-  *coll = neighborStateInfo.coll;
-  *sign = neighborStateInfo.sign;
-  // DEBUG_PRINT("get0AiStateInfo:steer:%.2f,coll:%.2f,sign:%.2f\n", *steer, *coll, *sign);
-  // memset(&neighborStateInfo.steer, 0, sizeof(float));
-  // memset(*coll, 0, sizeof(float));
-  // memset(&neighborStateInfo.sign, 0.5, sizeof(float));
-  return true;
+  if ((++get_times) % 4 == 0)
+  {
+    get_times = 0;
+    *steer = neighborStateInfo.steer;
+    *coll = neighborStateInfo.coll;
+    *sign = neighborStateInfo.sign;
+  }
+  else
+  {
+    *steer = 0.0f;
+    *coll = 0.0f;
+    // signFromation = 0.0f;
+  }
+  DEBUG_PRINT("get%d-steer:%.2f\tcoll:%.2f\tsign:%.2f\n",get_times,*steer, *coll, *sign);
+  return get_times;
 }
 
 void getCurrentNeighborAddressInfo_t(currentNeighborAddressInfo_t *currentNeighborAddressInfo)
@@ -198,7 +206,6 @@ void getCurrentNeighborAddressInfo_t(currentNeighborAddressInfo_t *currentNeighb
   }
   xSemaphoreGive(rangingTableSetMutex);
   /*--11添加--*/
-
 }
 
 uint16_t get_tx_rx_min_interval(address_t address)
@@ -287,10 +294,10 @@ static void uwbRangingTxTask(void *parameters)
 
   UWB_Packet_t txPacketCache;
   txPacketCache.header.type = RANGING;
-  //  txPacketCache.header.mac = ? TODO init mac header 
+  //  txPacketCache.header.mac = ? TODO init mac header
   while (true)
   {
-  
+
     int msgLen = generateRangingMessage((Ranging_Message_t *)&txPacketCache.payload);
     txPacketCache.header.length = sizeof(Packet_Header_t) + msgLen;
     uwbSendPacketBlock(&txPacketCache);
@@ -383,7 +390,7 @@ int16_t computeDistance(uint16_t neighborAddress, Timestamp_Tuple_t Tp, Timestam
   int16_t calcDist = (int16_t)tprop_ctn * 0.4691763978616;
   /*--7添加--*/
   /*这里暂时采用和李树帅twr中一样的形式*/
-  //DEBUG_PRINT("%d\n",calcDist);
+  // DEBUG_PRINT("%d\n",calcDist);
 
   if (calcDist > 0 && calcDist < 1000)
   {
@@ -445,7 +452,7 @@ void processRangingMessage(Ranging_Message_With_Timestamp_t *rangingMessageWithT
   /*这里用于测试数据丢包情况*/
   neighbor_latest_rvTime[neighborAddress] = curr_time;
   tx_rv_interval_history[neighborAddress].latest_data_index = (tx_rv_interval_history[neighborAddress].latest_data_index + 1) % TX_RV_INTERVAL_HISTORY_SIZE;
-  //DEBUG_PRINT("%d",tx_rv_interval_history[neighborAddress].latest_data_index);
+  // DEBUG_PRINT("%d",tx_rv_interval_history[neighborAddress].latest_data_index);
   tx_rv_interval_history[neighborAddress].interval[tx_rv_interval_history[neighborAddress].latest_data_index] = curr_time - latest_txTime;
 
   tx_rv_interval[neighborAddress] = curr_time - latest_txTime;
@@ -456,12 +463,11 @@ void processRangingMessage(Ranging_Message_With_Timestamp_t *rangingMessageWithT
   //   test_0_lastRv = curr_time;
   // }
 
-
   // DEBUG_PRINT("%d,%d,%d\n", neighborAddress, tx_rv_interval_history[neighborAddress].latest_data_index, tx_rv_interval_history[neighborAddress].interval[tx_rv_interval_history[neighborAddress].latest_data_index]);
   if (tx_rv_interval[neighborAddress] <= 1)
   {
 
-    nextTransportPeriod = TX_PERIOD_IN_MS/4 + rand() % 15;
+    nextTransportPeriod = TX_PERIOD_IN_MS / 4 + rand() % 15;
     last_swapPeriod_Time = xTaskGetTickCount();
     last_swapPeriod_period = nextTransportPeriod;
   }
@@ -479,22 +485,29 @@ void processRangingMessage(Ranging_Message_With_Timestamp_t *rangingMessageWithT
   /*--8添加--*/
 
   /*记录丢包率-测距成功次数*/
-  if(isNewAddNeighbor){
-    LOSS_COUNT[neighborAddress]=0;
-    RECEIVE_COUNT[neighborAddress]=1;
-    DIST_COUNT[neighborAddress]=0;
-  }else{
-      uint16_t lastSeqNumber = LAST_RECEIVED_SEQ[neighborAddress];
-      uint16_t curSeqNumber = rangingMessage->header.msgSequence;
-      if(curSeqNumber<lastSeqNumber){
-        LOSS_COUNT[neighborAddress] += (curSeqNumber+1) + 65535-lastSeqNumber - 1;
-      }else{
-        LOSS_COUNT[neighborAddress] += curSeqNumber - lastSeqNumber - 1;
-      }
-      RECEIVE_COUNT[neighborAddress]++;
+  if (isNewAddNeighbor)
+  {
+    LOSS_COUNT[neighborAddress] = 0;
+    RECEIVE_COUNT[neighborAddress] = 1;
+    DIST_COUNT[neighborAddress] = 0;
+  }
+  else
+  {
+    uint16_t lastSeqNumber = LAST_RECEIVED_SEQ[neighborAddress];
+    uint16_t curSeqNumber = rangingMessage->header.msgSequence;
+    if (curSeqNumber < lastSeqNumber)
+    {
+      LOSS_COUNT[neighborAddress] += (curSeqNumber + 1) + 65535 - lastSeqNumber - 1;
+    }
+    else
+    {
+      LOSS_COUNT[neighborAddress] += curSeqNumber - lastSeqNumber - 1;
+    }
+    RECEIVE_COUNT[neighborAddress]++;
   }
 
-  LAST_RECEIVED_SEQ[neighborAddress] = rangingMessage->header.msgSequence;;
+  LAST_RECEIVED_SEQ[neighborAddress] = rangingMessage->header.msgSequence;
+  ;
   // PACKET_LOSS_RATE[neighborAddress] = (double) LOSS_COUNT[neighborAddress] / (RECEIVE_COUNT[neighborAddress] + LOSS_COUNT[neighborAddress]);
   /*记录丢包率*/
 
@@ -570,7 +583,7 @@ void processRangingMessage(Ranging_Message_With_Timestamp_t *rangingMessageWithT
         neighborRangingTable->Tf.timestamp.full && neighborRangingTable->Rf.timestamp.full)
     {
       dist_count++;
-      
+
       int16_t distance = computeDistance(neighborAddress, neighborRangingTable->Tp, neighborRangingTable->Rp,
                                          Tr_Rr_Candidate.Tr, Tr_Rr_Candidate.Rr,
                                          neighborRangingTable->Tf, neighborRangingTable->Rf);
@@ -652,21 +665,11 @@ int generateRangingMessage(Ranging_Message_t *rangingMessage)
   rangingMessage->header.velocity = (short)(velocity * 100);
   estimatorKalmanGetSwarmInfo(&rangingMessage->header.velocityXInWorld, &rangingMessage->header.velocityYInWorld, &rangingMessage->header.gyroZ, &rangingMessage->header.positionZ);
   // for AI///////////////////////////just need when MY_UWB_ADDRESS==0
-  if (MY_UWB_ADDRESS == 0)
+  if (MY_UWB_ADDRESS == leader_address&&uwbGetUartInfo(&aideck_data.steer, &aideck_data.coll, &aideck_data.sign)) // 获取到了AIdeck控制信息
   {
-    if (uwbGetUartInfo(&aideck_control.steer, &aideck_control.coll, &aideck_control.sign)) // 获取到了AIdeck控制信息
-    {
-      rangingMessage->header.steer = aideck_control.steer;
-      rangingMessage->header.coll = aideck_control.coll;
-      rangingMessage->header.sign = aideck_control.sign;
-    }
-    // else // 没有获取到AIdeck控制信息
-    // {
-    //   rangingMessage->header.steer = 0.0;
-    //   // rangingMessage->header.coll = aideck_control.coll;
-    //   rangingMessage->header.sign = 0.5;
-    // }
-    // DEBUG_PRINT("generate0:steer=%.2f, coll=%.2f, sign=%.2f\n", rangingMessage->header.steer, rangingMessage->header.coll, rangingMessage->header.sign);
+    rangingMessage->header.steer = aideck_data.steer;
+    rangingMessage->header.coll = aideck_data.coll;
+    rangingMessage->header.sign = aideck_data.sign;
   }
   else if (MY_UWB_ADDRESS != 0)
   {
@@ -692,13 +695,11 @@ LOG_ADD(LOG_INT16, distTo6, distanceTowards + 6)
 LOG_ADD(LOG_INT16, distTo7, distanceTowards + 7)
 LOG_ADD(LOG_INT16, distTo8, distanceTowards + 8)
 
+LOG_ADD(LOG_UINT8, discount, &dist_count)
+LOG_ADD(LOG_UINT8, disTrue, &dist_correct)
 
-
-LOG_ADD(LOG_UINT8, discount, &dist_count)     
-LOG_ADD(LOG_UINT8, disTrue, &dist_correct)     
-
-// LOG_ADD(LOG_UINT8, t0index, &test_0_index)   
-// LOG_ADD(LOG_UINT8, t0inter, &test_0_interval)   
+// LOG_ADD(LOG_UINT8, t0index, &test_0_index)
+// LOG_ADD(LOG_UINT8, t0inter, &test_0_interval)
 LOG_ADD(LOG_UINT32, lossNum0, LOSS_COUNT + 0) // 丢包数量
 LOG_ADD(LOG_UINT32, lossNum1, LOSS_COUNT + 1)
 LOG_ADD(LOG_UINT32, lossNum2, LOSS_COUNT + 2)
@@ -726,7 +727,6 @@ LOG_ADD(LOG_UINT32, distNum5, DIST_COUNT + 5)
 LOG_ADD(LOG_UINT32, distNum6, DIST_COUNT + 6)
 LOG_ADD(LOG_UINT32, distNum7, DIST_COUNT + 7)
 
-
 LOG_ADD(LOG_UINT8, index, &rv_any_index)               // 只要接收到数据包，index++
 LOG_ADD(LOG_UINT8, index0, rv_data_interval_index + 0) // 接收到0号无人机数据包，rv_data_interval_index[0]++
 LOG_ADD(LOG_UINT8, index1, rv_data_interval_index + 1)
@@ -736,13 +736,13 @@ LOG_ADD(LOG_UINT8, index4, rv_data_interval_index + 4)
 LOG_ADD(LOG_UINT8, index5, rv_data_interval_index + 5)
 LOG_ADD(LOG_UINT8, index6, rv_data_interval_index + 6)
 
-LOG_ADD(LOG_UINT8, diff0, tx_rv_interval+0) // 与0号无人机的漂移差
-LOG_ADD(LOG_UINT8, diff1, tx_rv_interval+1) // 
-LOG_ADD(LOG_UINT8, diff2, tx_rv_interval+2) // 
-LOG_ADD(LOG_UINT8, diff3, tx_rv_interval+3) // 
-LOG_ADD(LOG_UINT8, diff4, tx_rv_interval+4) // 
-LOG_ADD(LOG_UINT8, diff5, tx_rv_interval+5) // 
-LOG_ADD(LOG_UINT8, diff6, tx_rv_interval+6) // 
+LOG_ADD(LOG_UINT8, diff0, tx_rv_interval + 0) // 与0号无人机的漂移差
+LOG_ADD(LOG_UINT8, diff1, tx_rv_interval + 1) //
+LOG_ADD(LOG_UINT8, diff2, tx_rv_interval + 2) //
+LOG_ADD(LOG_UINT8, diff3, tx_rv_interval + 3) //
+LOG_ADD(LOG_UINT8, diff4, tx_rv_interval + 4) //
+LOG_ADD(LOG_UINT8, diff5, tx_rv_interval + 5) //
+LOG_ADD(LOG_UINT8, diff6, tx_rv_interval + 6) //
 
 LOG_ADD(LOG_UINT16, interval0, rv_data_interval + 0) // 连续两次接收到0号无人机的时间差
 LOG_ADD(LOG_UINT16, interval1, rv_data_interval + 1)
@@ -755,8 +755,8 @@ LOG_ADD(LOG_UINT8, period, &nextTransportPeriod)
 LOG_ADD(LOG_UINT8, seq, &rangingSeqNumber)
 LOG_GROUP_STOP(Ranging)
 
-LOG_GROUP_START(AIdeck_control)
-LOG_ADD(LOG_FLOAT, Steer, &aideck_control.steer)
-LOG_ADD(LOG_FLOAT, Coll, &aideck_control.coll)
-LOG_ADD(LOG_FLOAT, Sign, &aideck_control.sign)
-LOG_GROUP_STOP(AIdeck_control)
+LOG_GROUP_START(aideck_data)
+LOG_ADD(LOG_FLOAT, Steer, &aideck_data.steer)
+LOG_ADD(LOG_FLOAT, Coll, &aideck_data.coll)
+LOG_ADD(LOG_FLOAT, Sign, &aideck_data.sign)
+LOG_GROUP_STOP(aideck_data)

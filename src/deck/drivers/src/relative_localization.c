@@ -7,15 +7,15 @@
 #include "arm_math.h"
 #include "FreeRTOS.h"
 #include "task.h"
-
 #include "param.h"
-
 #include "log.h"
 #include "system.h"
 #include "semphr.h"
 #include "swarm_ranging.h"
 #include <radiolink.h>
 #include "estimator_kalman.h"
+#define DEBUG_MODULE "LOCA"
+#include "debug.h"
 
 static uint16_t MY_UWB_ADDRESS;
 static bool isInit;
@@ -58,7 +58,6 @@ static float vxj, vyj, rj; // receive vx, vy, gz and distance
 static float vxi, vyi, ri; // self vx, vy, gz
 static uint16_t dij;       // distance between self i and other j
 static float hi, hj;       // height of robot i and j
-
 
 static currentNeighborAddressInfo_t currentNeighborAddressInfo;
 static int16_t initRelativePosition[5][5][STATE_DIM_rl]; /*用于在指定无人机的初始位置时使用*/
@@ -144,7 +143,8 @@ void relativeLocoTask(void *arg)
 
             if (getNeighborStateInfo(neighborAddress, &dij, &vxj_t, &vyj_t, &rj, &hj_t, &isNewAdd))
             {
-                // DEBUG_PRINT("start：%d\n", xTaskGetTickCount());
+
+                // DEBUG_PRINT("start:%d\n", xTaskGetTickCount());
                 vxj = (vxj_t + 0.0) / 100;
                 vyj = (vyj_t + 0.0) / 100;
                 hj = (hj_t + 0.0) / 100;
@@ -162,8 +162,7 @@ void relativeLocoTask(void *arg)
                     float dtEKF = (float)(osTick - relaVar[neighborAddress].oldTimetick) / configTICK_RATE_HZ;
                     relaVar[neighborAddress].oldTimetick = osTick;
                     relativeEKF(neighborAddress, vxi, vyi, ri, hi, vxj, vyj, rj, hj, dij, dtEKF);
-
-                    // DEBUG_PRINT("end：%d\n", xTaskGetTickCount());
+                    // DEBUG_PRINT("end:%d\n", xTaskGetTickCount());
                 }
                 else
                 {
@@ -261,7 +260,9 @@ void relativeEKF(int n, float vxi, float vyi, float ri, float hi, float vxj, flo
     mat_trans(&tmpNN1m, &tmpNN2m);     // (KH - I)'
     mat_mult(&tmpNN1m, &Pm, &tmpNN3m); // (KH - I)*P
     mat_mult(&tmpNN3m, &tmpNN2m, &Pm); // (KH - I)*P*(KH - I)'
-    // DEBUG_PRINT("dis:%d\n", dij);
+    // if(dij < 60 || dij > 80)
+        // DEBUG_PRINT("dis:%d\n", dij);
+
 }
 
 bool relativeInfoRead(float *relaVarParam, currentNeighborAddressInfo_t *dest)
