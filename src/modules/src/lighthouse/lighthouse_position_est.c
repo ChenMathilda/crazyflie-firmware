@@ -40,6 +40,7 @@
 #include "lighthouse_position_est.h"
 #include "lighthouse_geometry.h"
 #include "lighthouse_state.h"
+#include "debug.h"
 
 #define ONE_SECOND 1000
 #define HALF_SECOND 500
@@ -273,6 +274,11 @@ static void estimatePositionCrossingBeams(const pulseProcessor_t *state, pulsePr
   } else {
     deltaLog = 0;
   }
+}
+
+void print_AbsPose()
+{
+  DEBUG_PRINT("ABS_pos-x:%f\ty:%f\tz:%f\n", ext_pos.x, ext_pos.x, ext_pos.x);
 }
 
 static void estimatePositionSweepsLh1(const pulseProcessor_t* appState, pulseProcessorResult_t* angles, int baseStation) {

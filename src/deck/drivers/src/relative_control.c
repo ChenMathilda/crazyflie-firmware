@@ -16,6 +16,7 @@
 #include "math.h"
 #include "adhocdeck.h"
 #include "led.h"
+// #include "lighthouse_position_est.h"
 #define DEBUG_MODULE "CTRL"
 #include "debug.h"
 
@@ -256,6 +257,7 @@ void relativeControlTask(void *arg)
   ledInit();
   systemWaitStart();
   reset_estimators(); // 判断无人机数值是否收敛
+  uint8_t i = 0;
   while (1)
   {
     vTaskDelay(10);
@@ -269,53 +271,58 @@ void relativeControlTask(void *arg)
         take_off();
         takeoff_tick = xTaskGetTickCount();
       }
-      // control loop
-      tickInterval = xTaskGetTickCount() - takeoff_tick;
-      // DEBUG_PRINT("tick:%d,rlx:%f,rly:%f,rlraw:%f\n", tickInterval, relaVarInCtrl[0][STATE_rlX], relaVarInCtrl[0][STATE_rlY], relaVarInCtrl[0][STATE_rlYaw]);
-      if (tickInterval <= 5000)
-      {
-        float_t randomVel = 0.3;      // 0-1 m/s
-        flyRandomIn1meter(randomVel); // random flight within first 10 seconds
-        targetX = relaVarInCtrl[0][STATE_rlX];
-        targetY = relaVarInCtrl[0][STATE_rlY];
-      }
-      else if ((tickInterval > 5000) && (tickInterval <= 10000))
-      {
-        if (MY_UWB_ADDRESS == 0)
-        {
-          float_t randomVel = 0.3;
-          flyRandomIn1meter(randomVel);
-        }
-        else
-        {
-          formation0asCenter(targetX, targetY, 0, height);
-        }
-        // NDI_formation0asCenter(targetX, targetY);
-      }
-      else if ((tickInterval > 10000) && (tickInterval <= 90000))
-      {
+      // // control loop
+      // tickInterval = xTaskGetTickCount() - takeoff_tick;
+      // // DEBUG_PRINT("tick:%d,rlx:%f,rly:%f,rlraw:%f\n", tickInterval, relaVarInCtrl[0][STATE_rlX], relaVarInCtrl[0][STATE_rlY], relaVarInCtrl[0][STATE_rlYaw]);
+      // if (tickInterval <= 5000)
+      // {
+      //   float_t randomVel = 0.3;      // 0-1 m/s
+      //   flyRandomIn1meter(randomVel); // random flight within first 10 seconds
+      //   targetX = relaVarInCtrl[0][STATE_rlX];
+      //   targetY = relaVarInCtrl[0][STATE_rlY];
+      // }
+      // else if ((tickInterval > 5000) && (tickInterval <= 10000))
+      // {
+      //   if (MY_UWB_ADDRESS == 0)
+      //   {
+      //     float_t randomVel = 0.3;
+      //     flyRandomIn1meter(randomVel);
+      //   }
+      //   else
+      //   {
+      //     formation0asCenter(targetX, targetY, 0, height);
+      //   }
+      //   // NDI_formation0asCenter(targetX, targetY);
+      // }
+      // else if ((tickInterval > 10000) && (tickInterval <= 90000))
+      // {
 
-        if (MY_UWB_ADDRESS == 0)
-        {
-          // gap8 700ms发送一次，DMA 900ms接收一次
-          // control 900ms获取一次数据:运行90次拿一次数据
-          uint8_t times = get0AiStateInfo(&steerAngle, &collision, &signFromation);
-          flyRandomByAIResult(steerAngle, collision, height);
-        }
-        else
-        {
-          // 0号无人机在本机坐标系下的yaw
-          // R：0号无人机到本机坐标系下的旋转矩阵
-          // 本机坐标系发生改变，需要将本机原始目标位置转换到新的本机坐标系下
-          targetX = -cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlX] + sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlY];
-          targetY = -sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlX] - cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlY];
-          targetYaw = 0; // relaVarInCtrl[0][STATE_rlYaw] * 180.0 / (3 * 3.14);
-          DEBUG_PRINT("targetX:%.2f\ttargetY:%.2f\ttargetYaw:%.2f\n", targetX, targetY, targetYaw);
-          // DEBUG_PRINT("tick:%d,rlx:%f,rly:%f,rlraw:%f\n", tickInterval, relaVarInCtrl[0][STATE_rlX], relaVarInCtrl[0][STATE_rlY], relaVarInCtrl[0][STATE_rlYaw]);
-          formation0asCenter(targetX, targetY, targetYaw, height);
-        }
-        // DEBUG_PRINT("%d-1\n", tickInterval);
-      }
+      //   if (MY_UWB_ADDRESS == 0)
+      //   {
+      //     // gap8 700ms发送一次，DMA 900ms接收一次
+      //     // control 900ms获取一次数据:运行90次拿一次数据
+      //     uint8_t times = get0AiStateInfo(&steerAngle, &collision, &signFromation);
+      //     flyRandomByAIResult(steerAngle, collision, height);
+      //   }
+      //   else
+      //   {
+      //     // 0号无人机在本机坐标系下的yaw
+      //     // R：0号无人机到本机坐标系下的旋转矩阵
+      //     // 本机坐标系发生改变，需要将本机原始目标位置转换到新的本机坐标系下
+      //     targetX = -cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlX] + sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlY];
+      //     targetY = -sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlX] - cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlY];
+      //     targetYaw = 0; // relaVarInCtrl[0][STATE_rlYaw] * 180.0 / (3 * 3.14);
+      //     if ((++i) % 50 == 0)
+      //     {
+      //       i = 0;
+      //       // print_AbsPose();
+      //       DEBUG_PRINT("REL_pos-X:%.2f\tY:%.2f\tZ:%.2f\n", targetX, targetY, height);
+      //     }
+
+      //     // DEBUG_PRINT("tick:%d,rlx:%f,rly:%f,rlraw:%f\n", tickInterval, relaVarInCtrl[0][STATE_rlX], relaVarInCtrl[0][STATE_rlY], relaVarInCtrl[0][STATE_rlYaw]);
+      //     formation0asCenter(targetX, targetY, targetYaw, height);
+      //   }
+      // }
       //       else if ((tickInterval > 10000) && (tickInterval <= 90000))
       //       {
       //         if (ledTest())
@@ -367,7 +374,7 @@ void relativeControlTask(void *arg)
       //     formation0asCenter(targetX, targetY, 0, height + 0.2 * signFromation);
       //   }
       // }
-      else if (tickInterval > 90000 && tickInterval <= 91000)
+      else if (tickInterval > 0 && tickInterval <= 91000)
       {
 
         if (MY_UWB_ADDRESS == 0)

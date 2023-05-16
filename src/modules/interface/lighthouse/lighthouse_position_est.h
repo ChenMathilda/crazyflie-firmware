@@ -50,3 +50,4 @@ void lighthousePositionCalibrationDataWritten(const uint8_t baseStation);
 
 void lighthousePositionEstimatePoseCrossingBeams(const pulseProcessor_t *state, pulseProcessorResult_t* angles, int baseStation);
 void lighthousePositionEstimatePoseSweeps(const pulseProcessor_t *state, pulseProcessorResult_t* angles, int baseStation);
+void print_AbsPose();

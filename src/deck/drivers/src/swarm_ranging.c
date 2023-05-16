@@ -172,7 +172,7 @@ bool getNeighborStateInfo(uint16_t neighborAddress, uint16_t *distance, short *v
 static uint8_t get_times;
 uint8_t get0AiStateInfo(float *steer, float *coll, float *sign)
 {
-  if ((++get_times) % 4 == 0)
+  if ((++get_times) % 3 == 0)
   {
     get_times = 0;
     *steer = neighborStateInfo.steer;
