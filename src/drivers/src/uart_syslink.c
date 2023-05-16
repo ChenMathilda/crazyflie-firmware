@@ -45,6 +45,8 @@
 #include "queuemonitor.h"
 #include "static_mem.h"
 
+#define DEBUG_MODULE "U-SLK"
+#include "debug.h"
 
 #define UARTSLK_DATA_TIMEOUT_MS 1000
 #define UARTSLK_DATA_TIMEOUT_TICKS (UARTSLK_DATA_TIMEOUT_MS / portTICK_RATE_MS)
@@ -59,7 +61,8 @@ static StaticSemaphore_t waitUntilSendDoneBuffer;
 static xSemaphoreHandle uartBusy;
 static StaticSemaphore_t uartBusyBuffer;
 static xQueueHandle syslinkPacketDelivery;
-STATIC_MEM_QUEUE_ALLOC(syslinkPacketDelivery, 100, sizeof(SyslinkPacket));
+STATIC_MEM_QUEUE_ALLOC(syslinkPacketDelivery, 8, sizeof(SyslinkPacket));
+static bool syslinkPacketDeliveryReadyToReceive = false;
 
 #ifdef CONFIG_SYSLINK_RX_DMA
 static uint8_t dmaRXBuffer[64];
@@ -83,6 +86,14 @@ static void uartslkHandleDataFromISR(uint8_t c, BaseType_t * const pxHigherPrior
 
 static void uartslkPauseDma();
 static void uartslkResumeDma();
+
+// Debug probe
+static uint32_t dmaPausedCounter;
+static uint32_t dmaTxStreamPausedCounter;
+static uint32_t dmaResumedCounter;
+static uint32_t dmaTxStreamResumedCounter;
+static bool dmaNrfFlowControlBufferFull;
+static uint32_t dmaSendWhileNrfBufferFull;
 
 /**
   * Configures the UART DMA. Mainly used for FreeRTOS trace
@@ -112,7 +123,7 @@ void uartslkDmaInit(void)
   DMA_InitStructureShareTX.DMA_Channel = UARTSLK_DMA_TX_CH;
 
   NVIC_InitStructure.NVIC_IRQChannel = UARTSLK_DMA_TX_IRQ;
-  NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = NVIC_HIGH_PRI;
+  NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = NVIC_SYSLINK_DMA_PRI;
   NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
   NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
   NVIC_Init(&NVIC_InitStructure);
@@ -137,7 +148,7 @@ void uartslkDmaInit(void)
   DMA_Init(UARTSLK_DMA_RX_STREAM, &DMA_InitStructureShareRX);
 
   NVIC_InitStructure.NVIC_IRQChannel = UARTSLK_DMA_RX_IRQ;
-  NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = NVIC_HIGH_PRI;
+  NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = NVIC_SYSLINK_DMA_PRI;
   NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
   NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
   NVIC_Init(&NVIC_InitStructure);
@@ -199,7 +210,7 @@ void uartslkInit(void)
 
   // Configure Rx buffer not empty interrupt
   NVIC_InitStructure.NVIC_IRQChannel = UARTSLK_IRQ;
-  NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = NVIC_SYSLINK_PRI;
+  NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = NVIC_SYSLINK_UART_PRI;
   NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
   NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
   NVIC_Init(&NVIC_InitStructure);
@@ -243,6 +254,11 @@ void uartslkResumeRx(void)
 {
   rxState = waitForFirstStart;
   NVIC_EnableIRQ(UARTSLK_IRQ);
+}
+
+void uartslkEnableIncoming()
+{
+  syslinkPacketDeliveryReadyToReceive = true;
 }
 
 void uartslkGetPacketBlocking(SyslinkPacket* packet)
@@ -289,6 +305,10 @@ int uartslkPutchar(int ch)
 
 void uartslkSendDataDmaBlocking(uint32_t size, uint8_t* data)
 {
+  if (dmaNrfFlowControlBufferFull) {
+    dmaSendWhileNrfBufferFull++;
+  }
+
   if (isUartDmaInitialized)
   {
     xSemaphoreTake(uartBusy, portMAX_DELAY);
@@ -303,7 +323,11 @@ void uartslkSendDataDmaBlocking(uint32_t size, uint8_t* data)
     // Enable the Transfer Complete interrupt
     DMA_ITConfig(UARTSLK_DMA_TX_STREAM, DMA_IT_TC, ENABLE);
     // Enable USART DMA TX Requests
+    // Critical section is needed as the RX DMA that runs form interrupt can
+    // change the same USARTx->CR3 register at the wrong point (not atomic).
+    taskENTER_CRITICAL();
     USART_DMACmd(UARTSLK_TYPE, USART_DMAReq_Tx, ENABLE);
+    taskEXIT_CRITICAL();
     // Clear transfer complete
     USART_ClearFlag(UARTSLK_TYPE, USART_FLAG_TC);
     // Enable DMA USART TX Stream
@@ -315,6 +339,8 @@ void uartslkSendDataDmaBlocking(uint32_t size, uint8_t* data)
 
 static void uartslkPauseDma()
 {
+  dmaNrfFlowControlBufferFull = true;
+  dmaPausedCounter++;
   if (DMA_GetCmdStatus(UARTSLK_DMA_TX_STREAM) == ENABLE)
   {
     // Disable transfer complete interrupt
@@ -328,11 +354,14 @@ static void uartslkPauseDma()
     // Read remaining data count
     remainingDMACount = DMA_GetCurrDataCounter(UARTSLK_DMA_TX_STREAM);
     dmaIsPaused = true;
+    dmaTxStreamPausedCounter++;
   }
 }
 
 static void uartslkResumeDma()
 {
+  dmaNrfFlowControlBufferFull = false;
+  dmaResumedCounter++;
   if (dmaIsPaused)
   {
     // Update DMA counter
@@ -346,6 +375,7 @@ static void uartslkResumeDma()
     // Enable DMA USART TX Stream
     DMA_Cmd(UARTSLK_DMA_TX_STREAM, ENABLE);
     dmaIsPaused = false;
+    dmaTxStreamResumedCounter++;
   }
 }
 
@@ -410,7 +440,10 @@ static void uartslkDmaRXIsr(void)
     // Post the packet to the queue if there's room
     if (!xQueueIsQueueFullFromISR(syslinkPacketDelivery))
     {
-      xQueueSendFromISR(syslinkPacketDelivery, (void *)&slp, &xHigherPriorityTaskWoken);
+      if (syslinkPacketDeliveryReadyToReceive)
+      {
+        xQueueSendFromISR(syslinkPacketDelivery, (void *)&slp, &xHigherPriorityTaskWoken);
+      }
     }
     else if(!(CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk))
     {
@@ -423,7 +456,7 @@ static void uartslkDmaRXIsr(void)
     if(!(CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk))
     {
       // Only assert if debugger is not connected
-      // ASSERT(0);
+      ASSERT(0);
     }
   }
 
@@ -455,15 +488,11 @@ void uartslkHandleDataFromISR(uint8_t c, BaseType_t * const pxHigherPriorityTask
       cksum[1] += cksum[0];
       dataIndex = 0;
 #ifdef CONFIG_SYSLINK_RX_DMA
-      if (c > 1)
+      if (c >= 1)
       {
         rxState = waitForFirstStart;
         // For efficiency receive using DMA
         uartslkReceiveDMA(slp.length + UARTSLK_CLKSUM_SIZE);
-      }
-      else if (c == 1)
-      {
-        rxState = waitForData;
       }
       else // zero length
       {
@@ -499,7 +528,7 @@ void uartslkHandleDataFromISR(uint8_t c, BaseType_t * const pxHigherPriorityTask
       if(!(CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk))
       {
         // Only assert if debugger is not connected
-        // ASSERT(0);
+        ASSERT(0);
       }
     }
     break;
@@ -509,7 +538,10 @@ void uartslkHandleDataFromISR(uint8_t c, BaseType_t * const pxHigherPriorityTask
       // Post the packet to the queue if there's room
       if (!xQueueIsQueueFullFromISR(syslinkPacketDelivery))
       {
-        xQueueSendFromISR(syslinkPacketDelivery, (void *)&slp, pxHigherPriorityTaskWoken);
+        if (syslinkPacketDeliveryReadyToReceive)
+        {
+          xQueueSendFromISR(syslinkPacketDelivery, (void *)&slp, pxHigherPriorityTaskWoken);
+        }
       }
       else if(!(CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk))
       {
@@ -520,7 +552,7 @@ void uartslkHandleDataFromISR(uint8_t c, BaseType_t * const pxHigherPriorityTask
     else
     {
       rxState = waitForFirstStart; //Checksum error
-      // ASSERT(0);
+      ASSERT(0);
     }
     rxState = waitForFirstStart;
     break;
@@ -606,3 +638,11 @@ void __attribute__((used)) DMA2_Stream1_IRQHandler(void)
   uartslkDmaRXIsr();
 }
 #endif
+
+void uartSyslinkDumpDebugProbe() {
+  DEBUG_PRINT("STM dmaPausedCounter: %ld\n",dmaPausedCounter);
+  DEBUG_PRINT("STM dmaTxStreamPausedCounter: %ld\n", dmaTxStreamPausedCounter);
+  DEBUG_PRINT("STM dmaResumedCounter: %ld\n", dmaResumedCounter);
+  DEBUG_PRINT("STM dmaTxStreamResumedCounter: %ld\n", dmaTxStreamResumedCounter);
+  DEBUG_PRINT("STM dmaSendWhileNrfBufferFull: %ld\n", dmaSendWhileNrfBufferFull);
+}

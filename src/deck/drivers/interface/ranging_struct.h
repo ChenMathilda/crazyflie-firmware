@@ -7,8 +7,8 @@
 #include "dwTypes.h"
 #include "adhocdeck.h"
 
-#define MAX_BODY_UNIT_NUMBER 30
-// #define MAX_BODY_UNIT_NUMBER (FRAME_LEN_MAX - sizeof(Ranging_Message_Header_t)) / sizeof(Body_Unit_t) // 1 ~ 83
+#define MAX_BODY_UNIT_NUMBER 10
+//#define MAX_BODY_UNIT_NUMBER (FRAME_LEN_MAX - sizeof(Ranging_Message_Header_t)) / sizeof(Body_Unit_t) // 1 ~ 83
 #define RANGING_TABLE_SIZE 10
 #define RANGING_TABLE_HOLD_TIME 10000
 
@@ -16,22 +16,19 @@ typedef portTickType Time_t;
 typedef short set_index_t;
 
 /* Timestamp Tuple */
-typedef struct
-{
-  dwTime_t timestamp;                        // 8 byte
-  uint16_t seqNumber;                        // 2 byte
+typedef struct {
+  dwTime_t timestamp; // 8 byte
+  uint16_t seqNumber; // 2 byte
 } __attribute__((packed)) Timestamp_Tuple_t; // 10 byte
 
 /* Body Unit */
-typedef struct
-{
-  uint16_t address;                    // 2 byte
-  Timestamp_Tuple_t timestamp;         // 10 byte
+typedef struct {
+  uint16_t address; // 2 byte
+  Timestamp_Tuple_t timestamp; // 10 byte
 } __attribute__((packed)) Body_Unit_t; // 12 byte
 
 /* Ranging Message Header*/
-typedef struct
-{
+typedef struct {
   uint16_t srcAddress;               // 2 byte
   uint16_t msgSequence;              // 2 byte
   Timestamp_Tuple_t lastTxTimestamp; // 10 byte
@@ -42,6 +39,7 @@ typedef struct
   float gyroZ;            // 4 byte rad/s
   uint16_t positionZ;     // 2 byte cm/s
   bool keep_flying;       // 无人机的飞行状态
+  int8_t stage;          // 飞行阶段
   /*--1添加--*/
 // for AI///////////////////////
   float steer;
@@ -53,30 +51,26 @@ typedef struct
 } __attribute__((packed)) Ranging_Message_Header_t; // 20 byte
 
 /* Ranging Message */
-typedef struct
-{
+typedef struct {
   Ranging_Message_Header_t header;             // 18 byte
   Body_Unit_t bodyUnits[MAX_BODY_UNIT_NUMBER]; // 12 byte * MAX_NEIGHBOR_SIZE
 } __attribute__((packed)) Ranging_Message_t;   // 20 + 12 byte * MAX_NEIGHBOR_SIZE
 
 /* Ranging Message With RX Timestamp, used in RX Queue */
-typedef struct
-{
+typedef struct {
   Ranging_Message_t rangingMessage;
   dwTime_t rxTime;
 } __attribute__((packed)) Ranging_Message_With_Timestamp_t;
 
 #define Tr_Rr_BUFFER_SIZE 5
 
-typedef struct
-{
+typedef struct {
   Timestamp_Tuple_t Tr;
   Timestamp_Tuple_t Rr;
 } __attribute__((packed)) Ranging_Table_Tr_Rr_Candidate_t;
 
 /* Tr and Rr candidate buffer for each Ranging Table */
-typedef struct
-{
+typedef struct {
   set_index_t latest;
   set_index_t cur;
   Ranging_Table_Tr_Rr_Candidate_t candidates[Tr_Rr_BUFFER_SIZE];
@@ -90,8 +84,7 @@ void rangingTableBufferUpdate(Ranging_Table_Tr_Rr_Buffer_t *rangingTableBuffer,
 Ranging_Table_Tr_Rr_Candidate_t rangingTableBufferGetCandidate(Ranging_Table_Tr_Rr_Buffer_t *rangingTableBuffer,
                                                                Timestamp_Tuple_t Tf);
 
-typedef enum
-{
+typedef enum {
   RESERVED = 0,
   TRANSMITTED = 1, // indicate body unit is transmitted
   RECEIVED = 2,
@@ -104,8 +97,7 @@ typedef enum
   |  Tp  |  Rr  |  Tf  |  Re  |  ts  |
   +------+------+------+------+------+
 */
-typedef struct
-{
+typedef struct {
   uint16_t neighborAddress;
 
   Timestamp_Tuple_t Rp;
@@ -126,15 +118,13 @@ typedef struct
 void rangingTableInit(Ranging_Table_t *rangingTable, uint16_t address);
 void rangingTableShift(Ranging_Table_t *rangingTable);
 
-typedef struct
-{
+typedef struct {
   set_index_t next;
   Ranging_Table_t data;
 } __attribute__((packed)) Ranging_Table_Set_Item_t;
 
 /* Ranging Table Set*/
-typedef struct
-{
+typedef struct {
   Ranging_Table_Set_Item_t setData[RANGING_TABLE_SIZE];
   set_index_t freeQueueEntry;
   set_index_t fullQueueEntry;

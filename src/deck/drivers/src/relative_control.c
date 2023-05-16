@@ -15,10 +15,14 @@
 #include "log.h"
 #include "math.h"
 #include "adhocdeck.h"
+<<<<<<< HEAD
 #include "led.h"
 // #include "lighthouse_position_est.h"
 #define DEBUG_MODULE "CTRL"
 #include "debug.h"
+=======
+#define RUNNING_STAGE 1 // 0代码debug阶段，1代码运行阶段
+>>>>>>> 8e7dbef
 
 static uint16_t MY_UWB_ADDRESS;
 static bool isInit;
@@ -28,8 +32,12 @@ static setpoint_t setpoint;
 static float_t relaVarInCtrl[RANGING_TABLE_SIZE + 1][STATE_DIM_rl];
 static currentNeighborAddressInfo_t currentNeighborAddressInfo;
 static float_t height = 0.5;
+<<<<<<< HEAD
 static uint32_t takeoff_tick;
 static uint32_t tickInterval;
+=======
+
+>>>>>>> 8e7dbef
 static float relaCtrl_p = 2.0f;
 static float relaCtrl_i = 0.0001f;
 static float relaCtrl_d = 0.01f;
@@ -251,10 +259,27 @@ void reset_estimators()
 
 void relativeControlTask(void *arg)
 {
+<<<<<<< HEAD
   static const float_t targetList[7][STATE_DIM_rl] = {{0.0f, 0.0f, 0.0f}, {-0.5f, -0.5f, 0.0f}, {0.5f, 0.5f, 0.0f}};
   static const float_t changeFormationList1[3][STATE_DIM_rl] = {{0.0f, 0.0f, 0.0f}, {-0.5f, 0.5f, 0.0f}, {-1.0f, 0.0f, 0.0f}};
   static const float_t changeFormationList2[3][STATE_DIM_rl] = {{0.0f, 0.0f, 0.0f}, {0.0f, 0.5f, 0.0f}, {-1.0f, 0.0f, 0.0f}};
   ledInit();
+=======
+  int8_t targetShift = 0;
+  uint8_t UAV_NUM = 9;
+  static const float_t targetList[10][STATE_DIM_rl] = {
+      {0.0f, 0.0f, 0.0f},   // 0
+      {-1.5f, -1.5f, 0.0f}, // 1
+      {-1.5f, 0.0f, 0.0f},  // 2
+      {-1.5f, 1.5f, 0.0f},  // 3
+      {0.0f, 1.5f, 0.0f},   // 4
+      {1.5f, 1.5f, 0.0f},   // 5
+      {1.5f, 0.0f, 0.0f},   // 6
+      {1.5, -1.5f, 0.0f},   // 7
+      {0.0f, -1.5f, 0.0f},  // 8
+      {0.0f, 0.0f, 0.0f},   // 9
+      {0.0f, 0.0f, 0.0f}};  // 10
+>>>>>>> 8e7dbef
   systemWaitStart();
   reset_estimators(); // 判断无人机数值是否收敛
   uint8_t i = 0;
@@ -263,8 +288,12 @@ void relativeControlTask(void *arg)
     vTaskDelay(10);
     keepFlying = getOrSetKeepflying(MY_UWB_ADDRESS, keepFlying);
     bool is_connect = relativeInfoRead((float_t *)relaVarInCtrl, &currentNeighborAddressInfo);
-    if (is_connect && keepFlying && !isCompleteTaskAndLand)
+    int8_t leaderStage = getLeaderStage();
+    // int8_t index = (MY_UWB_ADDRESS + targetShift) % (UAV_NUM-1) + 1; 
+    //DEBUG_PRINT("%d,%d\n",keepFlying,leaderStage);
+    if (RUNNING_STAGE == 1) // debug阶段就不能让无人机飞
     {
+<<<<<<< HEAD
       // take off
       if (onGround)
       {
@@ -380,6 +409,55 @@ void relativeControlTask(void *arg)
         if (MY_UWB_ADDRESS == 0)
         {
           setHoverSetpoint(&setpoint, 0, 0, height, 0);
+=======
+      if (is_connect && keepFlying && !isCompleteTaskAndLand)
+      {
+
+        // take off
+        if (onGround)
+        {
+          vTaskDelay(2000); // 设定位置使得其收敛时间
+          take_off();
+          // onGround = false;
+          setMyTakeoff(true);
+        }
+        // DEBUG_PRINT("tick:%d,rlx:%f,rly:%f,rlraw:%f\n", tickInterval, relaVarInCtrl[1][STATE_rlX], relaVarInCtrl[1][STATE_rlY], relaVarInCtrl[1][STATE_rlYaw]);
+        // DEBUG_PRINT("tick:%f\n", relaVarInCtrl[0][STATE_rlYaw]);
+        if (leaderStage == ZERO_STAGE) // 第0个阶段随机飞行
+        {
+          float_t randomVel = 0.7;
+          flyRandomIn1meter(randomVel);
+          targetX = relaVarInCtrl[0][STATE_rlX];
+          targetY = relaVarInCtrl[0][STATE_rlY];
+        }
+        else if (leaderStage == FIRST_STAGE) // 第1个阶段跟随飞行
+        {
+          if (MY_UWB_ADDRESS == 0)
+          {
+            float_t randomVel = 0.7;      // 0-randomVel m/s
+            flyRandomIn1meter(randomVel); //
+          }
+          else
+          {
+            formation0asCenter(targetX, targetY);
+          }
+        }
+        else if (leaderStage != LAND_STAGE) // 第三个阶段
+        {
+          if (MY_UWB_ADDRESS == 0)
+          {
+            setHoverSetpoint(&setpoint, 0, 0, height, 0);
+          }
+          else
+          {
+            targetShift = leaderStage;
+            // 使得targetList在1~UAV_NUM之间偏移
+            int8_t index = (MY_UWB_ADDRESS + targetShift) % (UAV_NUM-1) + 1; // 目标地址索引
+            targetX = -cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[index][STATE_rlX] + sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[index][STATE_rlY];
+            targetY = -sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[index][STATE_rlX] - cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[index][STATE_rlY];
+            formation0asCenter(targetX, targetY);
+          }
+>>>>>>> 8e7dbef
         }
         else
         {
@@ -388,7 +466,10 @@ void relativeControlTask(void *arg)
       }
       else
       {
+<<<<<<< HEAD
         // 运行90s之后，落地
+=======
+>>>>>>> 8e7dbef
         land();
       }
     }

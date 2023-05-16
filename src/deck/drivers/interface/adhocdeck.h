@@ -74,7 +74,7 @@ typedef enum {
 } MESSAGE_TYPE;
 
 typedef struct {
-  mhr_802_15_4_t mac;    // mac header
+//  mhr_802_15_4_t mac;    // mac header
   struct {
     MESSAGE_TYPE type: 6;
     uint16_t length: 10;
@@ -83,7 +83,7 @@ typedef struct {
 
 typedef struct {
   Packet_Header_t header; // Packet header
-  uint8_t payload[PAYLOAD_SIZE]
+  uint8_t payload[PAYLOAD_SIZE];
 } __attribute__((packed)) UWB_Packet_t;
 
 typedef void (*UWBCallback)(void *);

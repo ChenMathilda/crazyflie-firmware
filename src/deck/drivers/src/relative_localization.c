@@ -20,11 +20,11 @@
 static uint16_t MY_UWB_ADDRESS;
 static bool isInit;
 
-static float Qv = 1.0f;         // velocity deviation,初始值为1.0
-static float Qr = 0.7f;         // yaw rate deviation
-static float Ruwb = 1.0f;       // ranging deviation
-static float InitCovPos = 5.0f; // 初始位置误差
-static float InitCovYaw = 1.0f; // 初始偏航角误差
+static float Qv = 0.2f;         // velocity deviation,初始值为1.0    -0.25
+static float Qr = 0.1f;         // yaw rate deviation
+static float Ruwb = 0.2f;       // ranging deviation                -0.5
+static float InitCovPos = 0.2f; // 初始位置误差
+static float InitCovYaw = 0.2f; // 初始偏航角误差
 
 static relaVariable_t relaVar[RANGING_TABLE_SIZE];
 
@@ -60,7 +60,21 @@ static uint16_t dij;       // distance between self i and other j
 static float hi, hj;       // height of robot i and j
 
 static currentNeighborAddressInfo_t currentNeighborAddressInfo;
-static int16_t initRelativePosition[5][5][STATE_DIM_rl]; /*用于在指定无人机的初始位置时使用*/
+// static int16_t initRelativePosition[RANGING_TABLE_SIZE][RANGING_TABLE_SIZE][STATE_DIM_rl - 1];/*用于在指定无人机的初始位置时使用,由于在同一水平面，为了节省内存就不用Z轴了*/
+
+// 初始时，所有无人机基于0号无人机的相对位置
+static const float_t initPositionRela0[10][STATE_DIM_rl] = {
+    {0.0f, 0.0f, 0.0f},   // 0
+    {-1.5f, -1.5f, 0.0f}, // 1
+    {-1.5f, 0.0f, 0.0f},  // 2
+    {-1.5f, 1.5f, 0.0f},  // 3
+    {0.0f, 1.5f, 0.0f},   // 4
+    {1.5f, 1.5f, 0.0f},   // 5
+    {1.5f, 0.0f, 0.0f},   // 6
+    {1.5, -1.5f, 0.0f},   // 7
+    {0.0f, -1.5f, 0.0f},  // 8
+    {0.0f, 0.0f, 0.0f},   // 9
+    {0.0f, 0.0f, 0.0f}};  // 10
 
 // 矩阵转置
 static inline void mat_trans(const arm_matrix_instance_f32 *pSrc, arm_matrix_instance_f32 *pDst)
@@ -116,7 +130,13 @@ void relaVarInit(relaVariable_t *relaVar, uint16_t neighborAddress)
     // relaVar[neighborAddress].S[STATE_rlX] = initRelativePosition[neighborAddress][MY_UWB_ADDRESS][STATE_rlX]; // 设定初始位置
     // relaVar[neighborAddress].S[STATE_rlY] = initRelativePosition[neighborAddress][MY_UWB_ADDRESS][STATE_rlY];
     // relaVar[neighborAddress].S[STATE_rlYaw] = initRelativePosition[neighborAddress][MY_UWB_ADDRESS][STATE_rlYaw];
+    /*设定初始位置*/
+    relaVar[neighborAddress].S[STATE_rlX] = initPositionRela0[neighborAddress][STATE_rlX] - initPositionRela0[MY_UWB_ADDRESS][STATE_rlX]; // 设定初始位置
+    relaVar[neighborAddress].S[STATE_rlY] = initPositionRela0[neighborAddress][STATE_rlY] - initPositionRela0[MY_UWB_ADDRESS][STATE_rlY];
+    relaVar[neighborAddress].S[STATE_rlYaw] = 0;
+    /*----------*/
     relaVar[neighborAddress].oldTimetick = xTaskGetTickCount();
+    fullConnect = true;
     // DEBUG_PRINT("%f\n", relaVar[neighborAddress].S[STATE_rlX]);
 }
 
@@ -125,10 +145,8 @@ void relativeLocoTask(void *arg)
     /* 这块用于在指定无人机的初始位置时使用
     initRelativePosition[0][1][STATE_rlX] = 1; // 0号无人机相对于1号无人机的相对位置
     initRelativePosition[0][1][STATE_rlY] = -1;
-    initRelativePosition[0][1][STATE_rlY] = 0;
     initRelativePosition[1][0][STATE_rlX] = -1; // 1号无人机相对于0号无人机的相对位置
     initRelativePosition[1][0][STATE_rlY] = 1;
-    initRelativePosition[1][0][STATE_rlY] = 0;
     */
     systemWaitStart();
     while (1)
@@ -152,12 +170,12 @@ void relativeLocoTask(void *arg)
                 {
                     relaVarInit(relaVar, neighborAddress);
                 }
-                estimatorKalmanGetSwarmInfo(&vxi_t, &vyi_t, &ri, &hi_t); // 当前无人机的信息
-                vxi = (vxi_t + 0.0) / 100;
-                vyi = (vyi_t + 0.0) / 100;
-                hi = (hi_t + 0.0) / 100;
-                if (relaVar[neighborAddress].receiveFlag)
+                else
                 {
+                    estimatorKalmanGetSwarmInfo(&vxi_t, &vyi_t, &ri, &hi_t); // 当前无人机的信息
+                    vxi = (vxi_t + 0.0) / 100;
+                    vyi = (vyi_t + 0.0) / 100;
+                    hi = (hi_t + 0.0) / 100;
                     uint32_t osTick = xTaskGetTickCount();
                     float dtEKF = (float)(osTick - relaVar[neighborAddress].oldTimetick) / configTICK_RATE_HZ;
                     relaVar[neighborAddress].oldTimetick = osTick;
@@ -170,19 +188,20 @@ void relativeLocoTask(void *arg)
                     relaVar[neighborAddress].receiveFlag = true;
                     fullConnect = true;
                 }
+                DEBUG_PRINT("addr:%d,X:%f,Y:%f",neighborAddress,relaVar[neighborAddress].S[STATE_rlX],relaVar[neighborAddress].S[STATE_rlY]);
             }
         }
-        connectCount++;
-        // DEBUG_PRINT("%d\n", connectCount);
-        if (connectCount < 1000) // // 这里我设定的是60s没有测距，fullConnect=false
-        {
-            fullConnect = true; // disable control if there is no ranging after 1 second
-        }
-        else
-        {
-            // DEBUG_PRINT("------------");
-            fullConnect = false;
-        }
+    }
+    connectCount++;
+    // DEBUG_PRINT("%d\n", connectCount);
+    if (connectCount < 1000) // // 这里我设定的是60s没有测距，fullConnect=false
+    {
+        fullConnect = true; // disable control if there is no ranging after 1 second
+    }
+    else
+    {
+        // DEBUG_PRINT("------------");
+        fullConnect = false;
     }
 }
 
@@ -296,6 +315,9 @@ LOG_ADD(LOG_FLOAT, rlYaw1, &relaVar[1].S[STATE_rlYaw])
 LOG_ADD(LOG_FLOAT, rlX2, &relaVar[2].S[STATE_rlX])
 LOG_ADD(LOG_FLOAT, rlY2, &relaVar[2].S[STATE_rlY])
 LOG_ADD(LOG_FLOAT, rlYaw2, &relaVar[2].S[STATE_rlYaw])
+LOG_ADD(LOG_FLOAT, rlX3, &relaVar[3].S[STATE_rlX])
+LOG_ADD(LOG_FLOAT, rlY3, &relaVar[3].S[STATE_rlY])
+LOG_ADD(LOG_FLOAT, rlYaw3, &relaVar[3].S[STATE_rlYaw])
 LOG_GROUP_STOP(relative_pos)
 
 PARAM_GROUP_START(arelative_pos)
