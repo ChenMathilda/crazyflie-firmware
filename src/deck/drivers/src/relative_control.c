@@ -17,9 +17,13 @@
 #include "math.h"
 #include "adhocdeck.h"
 #include "led.h"
-// #include "lighthouse_position_est.h"
 #define DEBUG_MODULE "CTRL"
 #include "debug.h"
+
+// #define ABS_POSITION
+#ifdef ABS_POSITION
+#include "lighthouse_position_est.h"
+#endif
 
 static uint16_t MY_UWB_ADDRESS;
 static bool isInit;
@@ -285,6 +289,9 @@ void relativeControlTask(void *arg)
         flyRandomIn1meter(randomVel); // random flight within first 10 seconds
         targetX = relaVarInCtrl[0][STATE_rlX];
         targetY = relaVarInCtrl[0][STATE_rlY];
+#ifdef ABS_POSITION
+        print_AbsPose();
+#endif
       }
       else if ((tickInterval > 5000) && (tickInterval <= 30000)) // stage_1
       {
@@ -294,37 +301,39 @@ void relativeControlTask(void *arg)
         uint8_t times = get0AiStateInfo(&steerAngle, &collision, &signFromation);
         targetX = -cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlX] + sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlY];
         targetY = -sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlX] - cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlY];
+
         if (MY_UWB_ADDRESS == 0)
         {
           flyRandomByAIResult(steerAngle, collision, height);
         }
         else
         {
+#ifdef ABS_POSITION
+          print_AbsPose();
+          DEBUG_PRINT("ABS_pos-X:%f,Y:%f,Z:%f\n", targetX, targetY, height);
+#endif
           formation0asCenter(targetX, targetY, 0, height);
         }
         // NDI_formation0asCenter(targetX, targetY);
       }
       else if ((tickInterval > 30000) && (tickInterval <= 38000)) // stage_2
       {
+        uint8_t times = get0AiStateInfo(&steerAngle, &collision, &signFromation);
 #ifdef DEBUG_FLY
         DEBUG_PRINT("STAGE_2\n");
 #endif
-        // for (int i = 0; i < 5; i++)
-        // {
-        //   ledSet(LED_GREEN_L, 1);
-        //   ledSet(LED_GREEN_L, 0);
-        //   vTaskDelay(M2T(250));
-        //   ledSet(LED_RED_L, 1);
-        //   ledSet(LED_RED_L, 0);
-        uint8_t times = get0AiStateInfo(&steerAngle, &collision, &signFromation);
+
         DEBUG_PRINT("signal:%d\n", signFromation);
-        // }
         if (MY_UWB_ADDRESS == 0)
         {
           setHoverSetpoint(&setpoint, 0, 0, height, 0);
         }
         else
         {
+#ifdef ABS_POSITION
+          print_AbsPose();
+          DEBUG_PRINT("ABS_pos-X:%f,Y:%f,Z:%f\n", targetX, targetY, height);
+#endif
           formation0asCenter(targetX, targetY, 0, height);
         }
       }
@@ -354,6 +363,10 @@ void relativeControlTask(void *arg)
         }
         else
         {
+#ifdef ABS_POSITION
+          print_AbsPose();
+          DEBUG_PRINT("ABS_pos-X:%f,Y:%f,Z:%f\n", targetX, targetY, height);
+#endif
           // DEBUG_PRINT("flyheight:%.2f,targetX:%.2f,targetY:%.2f\n", height + 0.2 * signFromation, targetX, targetY);
           formation0asCenter(targetX, targetY, 0, height + 0.2 * signFromation);
         }
@@ -369,6 +382,10 @@ void relativeControlTask(void *arg)
         }
         else
         {
+#ifdef ABS_POSITION
+          print_AbsPose();
+          DEBUG_PRINT("ABS_pos-X:%f,Y:%f,Z:%f\n", targetX, targetY, height);
+#endif
           formation0asCenter(targetX, targetY, 0, height);
         }
       }
