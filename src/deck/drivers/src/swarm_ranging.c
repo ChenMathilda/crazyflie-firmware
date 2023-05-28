@@ -111,7 +111,6 @@ void setNeighborStateInfo(uint16_t neighborAddress, int16_t distance, Ranging_Me
   neighborStateInfo.steer = rangingMessageHeader->steer;
   neighborStateInfo.coll = rangingMessageHeader->coll;
   neighborStateInfo.sign = rangingMessageHeader->sign;
-
   // DEBUG_PRINT("setNeighborStateInfo:steer:%.2f,coll:%.2f,sign:%.2f\n", neighborStateInfo.steer, neighborStateInfo.coll, neighborStateInfo.sign);
   // for AI///////////////////////
   neighborStateInfo.refresh[neighborAddress] = true;
@@ -185,7 +184,7 @@ uint8_t get0AiStateInfo(float *steer, float *coll, float *sign)
     *coll = 0.0f;
     // signFromation = 0.0f;
   }
-  DEBUG_PRINT("get%d-steer:%.2f\tcoll:%.2f\tsign:%.2f\n",get_times,*steer, *coll, *sign);
+  DEBUG_PRINT("get%d-steer:%.2f\tcoll:%.2f\tsign:%.2f\n", get_times, *steer, *coll, *sign);
   return get_times;
 }
 
@@ -665,7 +664,7 @@ int generateRangingMessage(Ranging_Message_t *rangingMessage)
   rangingMessage->header.velocity = (short)(velocity * 100);
   estimatorKalmanGetSwarmInfo(&rangingMessage->header.velocityXInWorld, &rangingMessage->header.velocityYInWorld, &rangingMessage->header.gyroZ, &rangingMessage->header.positionZ);
   // for AI///////////////////////////just need when MY_UWB_ADDRESS==0
-  if (MY_UWB_ADDRESS == leader_address&&uwbGetUartInfo(&aideck_data.steer, &aideck_data.coll, &aideck_data.sign)) // 获取到了AIdeck控制信息
+  if (MY_UWB_ADDRESS == leader_address && uwbGetUartInfo(&aideck_data.steer, &aideck_data.coll, &aideck_data.sign)) // 获取到了AIdeck控制信息
   {
     rangingMessage->header.steer = aideck_data.steer;
     rangingMessage->header.coll = aideck_data.coll;

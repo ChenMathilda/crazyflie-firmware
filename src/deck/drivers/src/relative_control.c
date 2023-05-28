@@ -4,6 +4,7 @@
 #include "commander.h"
 #include "relative_control.h"
 #include "relative_localization.h"
+#include "crtp_commander_high_level.h"
 #include "ranging_struct.h"
 #include "num.h"
 #include "param.h"
@@ -31,11 +32,12 @@ static float_t height = 0.5;
 static uint32_t takeoff_tick;
 static uint32_t tickInterval;
 static float relaCtrl_p = 2.0f;
-static float relaCtrl_i = 0.0001f;
+// static float relaCtrl_i = 0.0001f;
+static float relaCtrl_i = 0.01f;
 static float relaCtrl_d = 0.01f;
 // static float NDI_k = 2.0f;
 
-// #define DEBUG_FLY
+#define DEBUG_FLY
 #ifndef DEBUG_FLY
 static bool keepFlying = false;
 #else
@@ -144,12 +146,12 @@ static void formation0asCenter(float_t tarX, float_t tarY, float_t targetYaw, fl
 
   // pid_vx = constrain(pid_vx + rep_x, -1.5f, 1.5f);
   // pid_vy = constrain(pid_vy + rep_y, -1.5f, 1.5f);
+  setHoverSetpoint(&setpoint, 0, 0, ai_height, targetYaw);
   for (int i = 1; i < 10; i++)
   {
     setHoverSetpoint(&setpoint, pid_vx, pid_vy, ai_height, 0);
     vTaskDelay(M2T(10));
   }
-  setHoverSetpoint(&setpoint, 0, 0, ai_height, targetYaw);
 }
 
 void take_off()
@@ -272,111 +274,95 @@ void relativeControlTask(void *arg)
         takeoff_tick = xTaskGetTickCount();
       }
       // // control loop
-      // tickInterval = xTaskGetTickCount() - takeoff_tick;
-      // // DEBUG_PRINT("tick:%d,rlx:%f,rly:%f,rlraw:%f\n", tickInterval, relaVarInCtrl[0][STATE_rlX], relaVarInCtrl[0][STATE_rlY], relaVarInCtrl[0][STATE_rlYaw]);
-      // if (tickInterval <= 5000)
-      // {
-      //   float_t randomVel = 0.3;      // 0-1 m/s
-      //   flyRandomIn1meter(randomVel); // random flight within first 10 seconds
-      //   targetX = relaVarInCtrl[0][STATE_rlX];
-      //   targetY = relaVarInCtrl[0][STATE_rlY];
-      // }
-      // else if ((tickInterval > 5000) && (tickInterval <= 10000))
-      // {
-      //   if (MY_UWB_ADDRESS == 0)
-      //   {
-      //     float_t randomVel = 0.3;
-      //     flyRandomIn1meter(randomVel);
-      //   }
-      //   else
-      //   {
-      //     formation0asCenter(targetX, targetY, 0, height);
-      //   }
-      //   // NDI_formation0asCenter(targetX, targetY);
-      // }
-      // else if ((tickInterval > 10000) && (tickInterval <= 90000))
-      // {
-
-      //   if (MY_UWB_ADDRESS == 0)
-      //   {
-      //     // gap8 700ms发送一次，DMA 900ms接收一次
-      //     // control 900ms获取一次数据:运行90次拿一次数据
-      //     uint8_t times = get0AiStateInfo(&steerAngle, &collision, &signFromation);
-      //     flyRandomByAIResult(steerAngle, collision, height);
-      //   }
-      //   else
-      //   {
-      //     // 0号无人机在本机坐标系下的yaw
-      //     // R：0号无人机到本机坐标系下的旋转矩阵
-      //     // 本机坐标系发生改变，需要将本机原始目标位置转换到新的本机坐标系下
-      //     targetX = -cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlX] + sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlY];
-      //     targetY = -sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlX] - cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlY];
-      //     targetYaw = 0; // relaVarInCtrl[0][STATE_rlYaw] * 180.0 / (3 * 3.14);
-      //     if ((++i) % 50 == 0)
-      //     {
-      //       i = 0;
-      //       // print_AbsPose();
-      //       DEBUG_PRINT("REL_pos-X:%.2f\tY:%.2f\tZ:%.2f\n", targetX, targetY, height);
-      //     }
-
-      //     // DEBUG_PRINT("tick:%d,rlx:%f,rly:%f,rlraw:%f\n", tickInterval, relaVarInCtrl[0][STATE_rlX], relaVarInCtrl[0][STATE_rlY], relaVarInCtrl[0][STATE_rlYaw]);
-      //     formation0asCenter(targetX, targetY, targetYaw, height);
-      //   }
-      // }
-      //       else if ((tickInterval > 10000) && (tickInterval <= 90000))
-      //       {
-      //         if (ledTest())
-      //         {
-      // #ifdef DEBUG_FLY
-      //           DEBUG_PRINT("%d-led\n", tickInterval);
-      // #endif
-      //         }
-      //         uint8_t times = get0AiStateInfo(&steerAngle, &collision, &signFromation);
-      //         if (MY_UWB_ADDRESS == 0)
-      //         {
-      //           setHoverSetpoint(&setpoint, 0, 0, height + 0.2 * signFromation, 0);
-      //         }
-      //         else
-      //         {
-      //           formation0asCenter(targetX, targetY, 0, height + 0.2 * signFromation);
-      //         }
-      // #ifdef DEBUG_FLY
-      //         DEBUG_PRINT("fly height:%.2f\n", height + 0.2 * signFromation);
-      // #endif
-      //       }
-      // else if ((tickInterval > 10000) && (tickInterval <= 90000))
-      // {
-      //   //gap8 700ms发送一次，DMA 900ms接收一次
-      //   //control 900ms获取一次数据:运行90次拿一次数据
-      //   uint8_t times = get0AiStateInfo(&steerAngle, &collision, &signFromation);
-      //   // DEBUG_PRINT("get_times%d\ttimes:%d\n",times,xTaskGetTickCount());
-      //   if (signFromation == 1)
-      //   {
-      //     targetX = -cosf(relaVarInCtrl[0][STATE_rlYaw]) * changeFormationList1[MY_UWB_ADDRESS][STATE_rlX] + sinf(relaVarInCtrl[0][STATE_rlYaw]) * changeFormationList1[MY_UWB_ADDRESS][STATE_rlY];
-      //     targetY = -sinf(relaVarInCtrl[0][STATE_rlYaw]) * changeFormationList1[MY_UWB_ADDRESS][STATE_rlX] - cosf(relaVarInCtrl[0][STATE_rlYaw]) * changeFormationList1[MY_UWB_ADDRESS][STATE_rlY];
-      //   }
-      //   else if (signFromation == -1)
-      //   {
-      //     targetX = -cosf(relaVarInCtrl[0][STATE_rlYaw]) * changeFormationList2[MY_UWB_ADDRESS][STATE_rlX] + sinf(relaVarInCtrl[0][STATE_rlYaw]) * changeFormationList2[MY_UWB_ADDRESS][STATE_rlY];
-      //     targetY = -sinf(relaVarInCtrl[0][STATE_rlYaw]) * changeFormationList2[MY_UWB_ADDRESS][STATE_rlX] - cosf(relaVarInCtrl[0][STATE_rlYaw]) * changeFormationList2[MY_UWB_ADDRESS][STATE_rlY];
-      //   }
-      //   else
-      //   {
-      //     targetX = -cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlX] + sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlY];
-      //     targetY = -sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlX] - cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlY];
-      //   }
-      //   if (MY_UWB_ADDRESS == 0)
-      //   {
-      //     setHoverSetpoint(&setpoint, 0, 0, height + 0.2 * signFromation, 0);
-      //   }
-      //   else
-      //   {
-      //     formation0asCenter(targetX, targetY, 0, height + 0.2 * signFromation);
-      //   }
-      // }
-      else if (tickInterval > 0 && tickInterval <= 91000)
+      tickInterval = xTaskGetTickCount() - takeoff_tick;
+      // DEBUG_PRINT("tick:%d,rlx:%f,rly:%f,rlraw:%f\n", tickInterval, relaVarInCtrl[0][STATE_rlX], relaVarInCtrl[0][STATE_rlY], relaVarInCtrl[0][STATE_rlYaw]);
+      if (tickInterval <= 5000) // stage_0
       {
-
+#ifdef DEBUG_FLY
+        DEBUG_PRINT("STAGE_0\n");
+#endif
+        float_t randomVel = 0.3;      // 0-1 m/s
+        flyRandomIn1meter(randomVel); // random flight within first 10 seconds
+        targetX = relaVarInCtrl[0][STATE_rlX];
+        targetY = relaVarInCtrl[0][STATE_rlY];
+      }
+      else if ((tickInterval > 5000) && (tickInterval <= 30000)) // stage_1
+      {
+#ifdef DEBUG_FLY
+        DEBUG_PRINT("STAGE_1\n");
+#endif
+        uint8_t times = get0AiStateInfo(&steerAngle, &collision, &signFromation);
+        targetX = -cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlX] + sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlY];
+        targetY = -sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlX] - cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlY];
+        if (MY_UWB_ADDRESS == 0)
+        {
+          flyRandomByAIResult(steerAngle, collision, height);
+        }
+        else
+        {
+          formation0asCenter(targetX, targetY, 0, height);
+        }
+        // NDI_formation0asCenter(targetX, targetY);
+      }
+      else if ((tickInterval > 30000) && (tickInterval <= 38000)) // stage_2
+      {
+#ifdef DEBUG_FLY
+        DEBUG_PRINT("STAGE_2\n");
+#endif
+        // for (int i = 0; i < 5; i++)
+        // {
+        //   ledSet(LED_GREEN_L, 1);
+        //   ledSet(LED_GREEN_L, 0);
+        //   vTaskDelay(M2T(250));
+        //   ledSet(LED_RED_L, 1);
+        //   ledSet(LED_RED_L, 0);
+        uint8_t times = get0AiStateInfo(&steerAngle, &collision, &signFromation);
+        DEBUG_PRINT("signal:%d\n", signFromation);
+        // }
+        if (MY_UWB_ADDRESS == 0)
+        {
+          setHoverSetpoint(&setpoint, 0, 0, height, 0);
+        }
+        else
+        {
+          formation0asCenter(targetX, targetY, 0, height);
+        }
+      }
+      else if ((tickInterval > 38000) && (tickInterval <= 90000)) // stage_3
+      {
+#ifdef DEBUG_FLY
+        DEBUG_PRINT("STAGE_3\n");
+#endif
+        if (signFromation == 1)
+        {
+          targetX = -cosf(relaVarInCtrl[0][STATE_rlYaw]) * changeFormationList1[MY_UWB_ADDRESS][STATE_rlX] + sinf(relaVarInCtrl[0][STATE_rlYaw]) * changeFormationList1[MY_UWB_ADDRESS][STATE_rlY];
+          targetY = -sinf(relaVarInCtrl[0][STATE_rlYaw]) * changeFormationList1[MY_UWB_ADDRESS][STATE_rlX] - cosf(relaVarInCtrl[0][STATE_rlYaw]) * changeFormationList1[MY_UWB_ADDRESS][STATE_rlY];
+        }
+        else if (signFromation == -1)
+        {
+          targetX = -cosf(relaVarInCtrl[0][STATE_rlYaw]) * changeFormationList2[MY_UWB_ADDRESS][STATE_rlX] + sinf(relaVarInCtrl[0][STATE_rlYaw]) * changeFormationList2[MY_UWB_ADDRESS][STATE_rlY];
+          targetY = -sinf(relaVarInCtrl[0][STATE_rlYaw]) * changeFormationList2[MY_UWB_ADDRESS][STATE_rlX] - cosf(relaVarInCtrl[0][STATE_rlYaw]) * changeFormationList2[MY_UWB_ADDRESS][STATE_rlY];
+        }
+        else
+        {
+          targetX = -cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlX] + sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlY];
+          targetY = -sinf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlX] - cosf(relaVarInCtrl[0][STATE_rlYaw]) * targetList[MY_UWB_ADDRESS][STATE_rlY];
+        }
+        if (MY_UWB_ADDRESS == 0)
+        {
+          setHoverSetpoint(&setpoint, 0, 0, height + 0.2 * signFromation, 0);
+        }
+        else
+        {
+          // DEBUG_PRINT("flyheight:%.2f,targetX:%.2f,targetY:%.2f\n", height + 0.2 * signFromation, targetX, targetY);
+          formation0asCenter(targetX, targetY, 0, height + 0.2 * signFromation);
+        }
+      }
+      else if (tickInterval > 90000 && tickInterval <= 91000) // stage_4
+      {
+#ifdef DEBUG_FLY
+        DEBUG_PRINT("STAGE_4\n");
+#endif
         if (MY_UWB_ADDRESS == 0)
         {
           setHoverSetpoint(&setpoint, 0, 0, height, 0);
@@ -391,6 +377,10 @@ void relativeControlTask(void *arg)
         // 运行90s之后，落地
         land();
       }
+    }
+    else
+    {
+      land();
     }
   }
 }
