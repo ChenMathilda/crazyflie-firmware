@@ -89,7 +89,7 @@ bool uwbGetUartInfo(float *steer, float *coll, float *sign)
 		memset(&dma_data.refresh, 0, sizeof(dma_data.refresh));
 		return true;
 	}
-	return false;	
+	return false;
 }
 
 static uint32_t uart_tick;
@@ -100,7 +100,7 @@ void uartRxTask(void *param)
 	while (1)
 	{
 		vTaskDelay(M2T(100));
-		if (dma_flag == 1 )
+		if (dma_flag == 1)
 		{
 			dma_flag = 0; // clear the flag
 			for (int i = 0; i < DMASIZE / 2; i++)
@@ -111,12 +111,12 @@ void uartRxTask(void *param)
 					dma_data.coll = (float)aideckRxDMA[i + 2] / 100;
 					dma_data.sign = (float)aideckRxDMA[i + 3] / 100;
 					dma_data.refresh = true;
+					DEBUG_PRINT("DMA-steer:%.2f\tcollision:%.2f\tsign: %.2f\n", dma_data.steer, dma_data.coll, dma_data.sign);
 					memset(aideckRxDMA, 0, DMASIZE * sizeof(uint8_t)); // clear the dma buffer
-					// uart_tick = xTaskGetTickCount();
-					// DEBUG_PRINT("tick:%d\n",uart_tick);
+																	   // uart_tick = xTaskGetTickCount();
+																	   // DEBUG_PRINT("tick:%d\n",uart_tick);
 				}
 			}
-			
 		}
 	}
 }

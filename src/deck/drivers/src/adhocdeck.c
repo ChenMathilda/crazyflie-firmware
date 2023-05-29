@@ -380,7 +380,7 @@ static const DeckDriver dwm3000_deck = {
     .name = "DWM3000",
 
 #ifdef CONFIG_DECK_ADHOCDECK_USE_ALT_PINS
-    .usedGpio = DECK_USING_IO_1 | DECK_USING_IO_2 | DECK_USING_IO_4,
+    .usedGpio = DECK_USING_IO_1 | DECK_USING_IO_2,
 #elif defined(CONFIG_DECK_ADHOCDECK_USE_UART2_PINS)
     .usedGpio = DECK_USING_IO_1 | DECK_USING_UART2,
 #else
