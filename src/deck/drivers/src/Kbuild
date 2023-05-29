@@ -27,3 +27,4 @@ obj-$(CONFIG_DECK_ADHOC)         += flooding_struct.o
 obj-$(CONFIG_DECK_ADHOC)         += flooding.o
 obj-$(CONFIG_DECK_ADHOC)         += relative_localization.o
 obj-$(CONFIG_DECK_ADHOC)         += relative_control.o
+obj-$(CONFIG_DECK_ADHOC)         += uart1_dma_task.o

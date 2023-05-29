@@ -55,7 +55,7 @@
 #include "stm32fxxx.h"
 #include "system.h"
 #include "buf2buf.h"
-
+#include "uart1_dma_task.h"
 #include "cpx_internal_router.h"
 #include "cpx_external_router.h"
 #include "cpx_uart_transport.h"
@@ -65,41 +65,44 @@
 
 static bool isInit = false;
 
-#define WIFI_SET_SSID_CMD         0x10
-#define WIFI_SET_KEY_CMD          0x11
+#define WIFI_SET_SSID_CMD 0x10
+#define WIFI_SET_KEY_CMD 0x11
 
-#define WIFI_CONNECT_CMD          0x20
-#define WIFI_CONNECT_AS_AP        0x01
-#define WIFI_CONNECT_AS_STA       0x00
-#define WIFI_CONNECT_AS_LENGTH    2
+#define WIFI_CONNECT_CMD 0x20
+#define WIFI_CONNECT_AS_AP 0x01
+#define WIFI_CONNECT_AS_STA 0x00
+#define WIFI_CONNECT_AS_LENGTH 2
 
-#define WIFI_AP_CONNECTED_CMD     0x31
+#define WIFI_AP_CONNECTED_CMD 0x31
 #define WIFI_CLIENT_CONNECTED_CMD 0x32
 
-#define CPX_ENABLE_CRTP_BRIDGE    0x10
+#define CPX_ENABLE_CRTP_BRIDGE 0x10
 
 #define GAP8_MAX_MEM_WRITE_TIMEOUT_MS 5000
 #define GAP8_MAX_MEM_VERIFY_TIMEOUT_MS 5000
 
-typedef struct {
+typedef struct
+{
   uint8_t cmd;
   uint32_t startAddress;
   uint32_t writeSize;
 } __attribute__((packed)) GAP8BlCmdPacket_t;
 
-typedef struct {
+typedef struct
+{
   uint8_t cmd;
 } __attribute__((packed)) ESP32SysPacket_t;
 
 #define GAP8_BL_CMD_START_WRITE (0x02)
-#define GAP8_BL_CMD_MD5         (0x04)
+#define GAP8_BL_CMD_MD5 (0x04)
 
 #define ESP32_SYS_CMD_RESET_GAP8 (0x10)
 
 static EventGroupHandle_t bootloaderSync;
-#define CPX_WAIT_FOR_BOOTLOADER_REPLY (1<<0)
+#define CPX_WAIT_FOR_BOOTLOADER_REPLY (1 << 0)
 
-typedef enum {
+typedef enum
+{
   ESP_MODE_NORMAL,
   ESP_MODE_PREPARE_FOR_BOOTLOADER,
   ESP_MODE_BOOTLOADER,
@@ -108,7 +111,8 @@ typedef enum {
 EspMode_t espMode = ESP_MODE_NORMAL;
 const uint32_t espUartReadMaxWait = M2T(100);
 
-void cpxBootloaderMessage(const CPXPacket_t * packet) {
+void cpxBootloaderMessage(const CPXPacket_t *packet)
+{
   xEventGroupSetBits(bootloaderSync, CPX_WAIT_FOR_BOOTLOADER_REPLY);
 }
 
@@ -118,8 +122,9 @@ static CPXPacket_t txPacket;
 static uint8_t flashBuffer[FLASH_BUFFER_SIZE];
 static Buf2bufContext_t gap8BufContext;
 
-static void sendFlashInit(const uint32_t fwSize) {
-  GAP8BlCmdPacket_t* gap8BlPacket = (GAP8BlCmdPacket_t*)txPacket.data;
+static void sendFlashInit(const uint32_t fwSize)
+{
+  GAP8BlCmdPacket_t *gap8BlPacket = (GAP8BlCmdPacket_t *)txPacket.data;
 
   gap8BlPacket->cmd = GAP8_BL_CMD_START_WRITE;
   gap8BlPacket->startAddress = 0x40000;
@@ -129,15 +134,17 @@ static void sendFlashInit(const uint32_t fwSize) {
   ASSERT(writeOk);
 }
 
-static void sendFlashBuffer(const uint32_t size) {
+static void sendFlashBuffer(const uint32_t size)
+{
   memcpy(&txPacket.data, flashBuffer, size);
   txPacket.dataLength = size;
   bool writeOk = cpxSendPacketBlockingTimeout(&txPacket, M2T(GAP8_MAX_MEM_WRITE_TIMEOUT_MS));
   ASSERT(writeOk);
 }
 
-static void sendFlashMd5Request(const uint32_t fwSize) {
-  GAP8BlCmdPacket_t* gap8BlPacket = (GAP8BlCmdPacket_t*)txPacket.data;
+static void sendFlashMd5Request(const uint32_t fwSize)
+{
+  GAP8BlCmdPacket_t *gap8BlPacket = (GAP8BlCmdPacket_t *)txPacket.data;
   gap8BlPacket->cmd = GAP8_BL_CMD_MD5;
   gap8BlPacket->startAddress = 0x40000;
   gap8BlPacket->writeSize = fwSize;
@@ -146,17 +153,19 @@ static void sendFlashMd5Request(const uint32_t fwSize) {
   ASSERT(writeOk);
 }
 
-static void waitForCpxResponse() {
+static void waitForCpxResponse()
+{
   EventBits_t bits = xEventGroupWaitBits(bootloaderSync,
-                      CPX_WAIT_FOR_BOOTLOADER_REPLY,
-                      pdTRUE,  // Clear bits before returning
-                      pdFALSE, // Wait for any bit
-                      M2T(GAP8_MAX_MEM_VERIFY_TIMEOUT_MS));
+                                         CPX_WAIT_FOR_BOOTLOADER_REPLY,
+                                         pdTRUE,  // Clear bits before returning
+                                         pdFALSE, // Wait for any bit
+                                         M2T(GAP8_MAX_MEM_VERIFY_TIMEOUT_MS));
   bool flashWritten = (bits & CPX_WAIT_FOR_BOOTLOADER_REPLY);
   ASSERT(flashWritten);
 }
 
-static bool gap8DeckFlasherWrite(const uint32_t memAddr, const uint8_t writeLen, const uint8_t *buffer, const DeckMemDef_t* memDef) {
+static bool gap8DeckFlasherWrite(const uint32_t memAddr, const uint8_t writeLen, const uint8_t *buffer, const DeckMemDef_t *memDef)
+{
   cpxInitRoute(CPX_T_STM32, CPX_T_GAP8, CPX_F_BOOTLOADER, &txPacket.route);
 
   const uint32_t fwSize = *(memDef->newFwSizeP);
@@ -166,22 +175,26 @@ static bool gap8DeckFlasherWrite(const uint32_t memAddr, const uint8_t writeLen,
   // The full binary that will be flashed is multiple of 4.
 
   const bool isFirstBuf = (memAddr == 0);
-  if (isFirstBuf) {
+  if (isFirstBuf)
+  {
     sendFlashInit(fwSize);
     buf2bufInit(&gap8BufContext, flashBuffer, FLASH_BUFFER_SIZE);
   }
 
   buf2bufAddInBuf(&gap8BufContext, buffer, writeLen);
   ASSERT(buf2bufBytesAdded(&gap8BufContext) <= fwSize);
-  while(buf2bufConsumeInBuf(&gap8BufContext)) {
+  while (buf2bufConsumeInBuf(&gap8BufContext))
+  {
     sendFlashBuffer(FLASH_BUFFER_SIZE);
   }
   buf2bufReleaseInBuf(&gap8BufContext);
 
   const bool isLastBuf = (buf2bufBytesConsumed(&gap8BufContext) == fwSize);
-  if (isLastBuf) {
+  if (isLastBuf)
+  {
     uint32_t size = buf2bufReleaseOutBuf(&gap8BufContext);
-    if (size > 0) {
+    if (size > 0)
+    {
       sendFlashBuffer(size);
     }
     ASSERT(buf2bufBytesAdded(&gap8BufContext) == buf2bufBytesConsumed(&gap8BufContext));
@@ -196,13 +209,13 @@ static bool gap8DeckFlasherWrite(const uint32_t memAddr, const uint8_t writeLen,
   return true;
 }
 
-
 static bool isGap8InBootloaderMode = false;
 
-static void resetGap8ToBootloader() {
+static void resetGap8ToBootloader()
+{
   cpxInitRoute(CPX_T_STM32, CPX_T_ESP32, CPX_F_SYSTEM, &txPacket.route);
 
-  ESP32SysPacket_t* esp32SysPacket = (ESP32SysPacket_t*)txPacket.data;
+  ESP32SysPacket_t *esp32SysPacket = (ESP32SysPacket_t *)txPacket.data;
 
   esp32SysPacket->cmd = ESP32_SYS_CMD_RESET_GAP8;
   txPacket.dataLength = sizeof(ESP32SysPacket_t);
@@ -217,18 +230,21 @@ static uint8_t gap8DeckFlasherPropertiesQuery()
 {
   uint8_t result = 0;
 
-  if (isInit) {
+  if (isInit)
+  {
     result |= DECK_MEMORY_MASK_STARTED;
   }
 
-  if (isGap8InBootloaderMode) {
+  if (isGap8InBootloaderMode)
+  {
     result |= DECK_MEMORY_MASK_BOOT_LOADER_ACTIVE;
   }
 
   return result;
 }
 
-static void resetEspToBootloader() {
+static void resetEspToBootloader()
+{
   espMode = ESP_MODE_PREPARE_FOR_BOOTLOADER;
 
   // Free up the UART and re-initialize it to the correct
@@ -274,59 +290,62 @@ uint8_t espDeckFlasherPropertiesQuery()
 }
 
 #ifndef CONFIG_DECK_AI_WIFI_NO_SETUP
-  static CPXPacket_t cpxTx;
-  static void setupWiFi() {
-  #ifdef CONFIG_DECK_AI_WIFI_SETUP_STA
-    DEBUG_PRINT("AI-deck will connect to WiFi\n");
-  #endif
+static CPXPacket_t cpxTx;
+static void setupWiFi()
+{
+#ifdef CONFIG_DECK_AI_WIFI_SETUP_STA
+  DEBUG_PRINT("AI-deck will connect to WiFi\n");
+#endif
 
-  #ifdef CONFIG_DECK_AI_WIFI_SETUP_AP
-    DEBUG_PRINT("AI-deck will become access point\n");
-  #endif
+#ifdef CONFIG_DECK_AI_WIFI_SETUP_AP
+  DEBUG_PRINT("AI-deck will become access point\n");
+#endif
 
-    cpxInitRoute(CPX_T_STM32, CPX_T_ESP32, CPX_F_WIFI_CTRL, &cpxTx.route);
+  cpxInitRoute(CPX_T_STM32, CPX_T_ESP32, CPX_F_WIFI_CTRL, &cpxTx.route);
 
-    cpxTx.data[0] = WIFI_SET_SSID_CMD; // Set SSID
-    memcpy(&cpxTx.data[1], CONFIG_DECK_AI_SSID, sizeof(CONFIG_DECK_AI_SSID));
-    cpxTx.dataLength = sizeof(CONFIG_DECK_AI_SSID);
-    cpxSendPacketBlocking(&cpxTx);
+  cpxTx.data[0] = WIFI_SET_SSID_CMD; // Set SSID
+  memcpy(&cpxTx.data[1], CONFIG_DECK_AI_SSID, sizeof(CONFIG_DECK_AI_SSID));
+  cpxTx.dataLength = sizeof(CONFIG_DECK_AI_SSID);
+  cpxSendPacketBlocking(&cpxTx);
 
-    cpxTx.data[0] = WIFI_SET_KEY_CMD; // Set SSID
-    memcpy(&cpxTx.data[1], CONFIG_DECK_AI_PASSWORD, sizeof(CONFIG_DECK_AI_PASSWORD));
-    cpxTx.dataLength = sizeof(CONFIG_DECK_AI_PASSWORD);
-    cpxSendPacketBlocking(&cpxTx);
+  cpxTx.data[0] = WIFI_SET_KEY_CMD; // Set SSID
+  memcpy(&cpxTx.data[1], CONFIG_DECK_AI_PASSWORD, sizeof(CONFIG_DECK_AI_PASSWORD));
+  cpxTx.dataLength = sizeof(CONFIG_DECK_AI_PASSWORD);
+  cpxSendPacketBlocking(&cpxTx);
 
-    cpxTx.data[0] = WIFI_CONNECT_CMD; // Connect wifi
-  #ifdef CONFIG_DECK_AI_WIFI_SETUP_STA
-    cpxTx.data[1] = WIFI_CONNECT_AS_STA;
-  #endif
-  #ifdef CONFIG_DECK_AI_WIFI_SETUP_AP
-    cpxTx.data[1] = WIFI_CONNECT_AS_AP;
-  #endif
-    cpxTx.dataLength = WIFI_CONNECT_AS_LENGTH;
-    cpxSendPacketBlocking(&cpxTx);
-  }
-  #endif
-
+  cpxTx.data[0] = WIFI_CONNECT_CMD; // Connect wifi
+#ifdef CONFIG_DECK_AI_WIFI_SETUP_STA
+  cpxTx.data[1] = WIFI_CONNECT_AS_STA;
+#endif
+#ifdef CONFIG_DECK_AI_WIFI_SETUP_AP
+  cpxTx.data[1] = WIFI_CONNECT_AS_AP;
+#endif
+  cpxTx.dataLength = WIFI_CONNECT_AS_LENGTH;
+  cpxSendPacketBlocking(&cpxTx);
+}
+#endif
 
 static void aideckInit(DeckInfo *info)
 {
   if (isInit)
     return;
+  uart1Init(115200);
 
-  pinMode(DECK_GPIO_IO2, OUTPUT);
-  pinMode(DECK_GPIO_IO3, OUTPUT);
+  xTaskCreate(uartRxTask, "AI-DECK-DMA", UART_RX_TASK_STACKSIZE, NULL,
+              UART1_TEST_TASK_PRI, NULL);
+  // pinMode(DECK_GPIO_IO2, OUTPUT);
+  // pinMode(DECK_GPIO_IO3, OUTPUT);
 
-  bootloaderSync = xEventGroupCreate();
+  // bootloaderSync = xEventGroupCreate();
 
   // Pull reset for GAP8/ESP32
   pinMode(DECK_GPIO_IO4, OUTPUT);
   digitalWrite(DECK_GPIO_IO4, LOW);
 
-  cpxUARTTransportInit();
-  cpxInternalRouterInit();
-  cpxExternalRouterInit();
-  cpxInit();
+  // cpxUARTTransportInit();
+  // cpxInternalRouterInit();
+  // cpxExternalRouterInit();
+  // cpxInit();
 
   // Release reset for GAP8/ESP32
   digitalWrite(DECK_GPIO_IO4, HIGH);
@@ -385,9 +404,8 @@ static const DeckDriver aideck_deck = {
     .test = aideckTest,
 };
 
-
 /** @addtogroup deck
-*/
+ */
 PARAM_GROUP_START(deck)
 
 /**
