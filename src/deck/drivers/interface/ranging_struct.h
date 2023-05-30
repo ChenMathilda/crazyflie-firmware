@@ -42,6 +42,11 @@ typedef struct
   float gyroZ;            // 4 byte rad/s
   uint16_t positionZ;     // 2 byte cm/s
   bool keep_flying;       // 无人机的飞行状态
+  //for AI///////////////
+  float steer;
+  float coll;
+  float sign;
+  //for AI///////////////
   int8_t stage;           // 飞行阶段
   bool isAlreadyTakeoff;  // 是否起飞
   /*--1添加--*/

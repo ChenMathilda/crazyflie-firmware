@@ -16,6 +16,7 @@
 #include "ranging_struct.h"
 #include "swarm_ranging.h"
 #include "estimator_kalman.h"
+#include "uart1_dma_task.h"
 
 static uint16_t MY_UWB_ADDRESS;
 /*用于计算丢包率*/
@@ -66,6 +67,15 @@ int16_t distanceTowards[RANGING_TABLE_SIZE + 1] = {[0 ... RANGING_TABLE_SIZE] = 
 /*--4添加--*/
 static leaderStateInfo_t leaderStateInfo;
 static neighborStateInfo_t neighborStateInfo; // 邻居的状态信息
+
+typedef struct 
+{
+  float steer;
+  float coll;
+  float sign; 
+}aideck_data_t;
+aideck_data_t aideck_data = {0.0f,0.0f,0.0f};
+
 void initNeighborStateInfoAndMedian_data()
 {
   for (int i = 0; i < RANGING_TABLE_SIZE + 1; i++)
@@ -106,6 +116,11 @@ void setNeighborStateInfo(uint16_t neighborAddress, int16_t distance, Ranging_Me
   neighborStateInfo.positionZ[neighborAddress] = rangingMessageHeader->positionZ;
   neighborStateInfo.refresh[neighborAddress] = true;
   neighborStateInfo.isAlreadyTakeoff[neighborAddress] = rangingMessageHeader->isAlreadyTakeoff;
+  //for AI///////////////
+  neighborStateInfo.steer = rangingMessageHeader->steer;
+  neighborStateInfo.coll = rangingMessageHeader->coll;
+  neighborStateInfo.sign = rangingMessageHeader->sign;
+  //for AI///////////////
   if (neighborAddress == leaderStateInfo.address)
   { /*无人机的keep_flying都是由0号无人机来设置的*/
     leaderStateInfo.keepFlying = rangingMessageHeader->keep_flying;
@@ -174,6 +189,25 @@ bool getNeighborStateInfo(uint16_t neighborAddress,
   }
 }
 
+static uint8_t get_times;
+uint8_t get0AIStateInfo(float *steer,float *coll,float *sign)
+{
+  if((++get_times)%3==0)
+  {
+    get_times = 0;
+    *steer = neighborStateInfo.steer;
+    *coll = neighborStateInfo.coll;
+    *sign = neighborStateInfo.sign;
+  }
+  else
+  {
+    *steer = 0.0f;
+    *coll = 0.0f;
+    *sign = 0.0f;
+  }
+  DEBUG_PRINT("get%d-steer:%.2f,coll:%.2f,sign%.2f\n",get_times,*steer,*coll,*sign);
+  return get_times;
+}
 void getCurrentNeighborAddressInfo_t(currentNeighborAddressInfo_t *currentNeighborAddressInfo)
 {
   /*--11添加--*/
@@ -192,6 +226,7 @@ void getCurrentNeighborAddressInfo_t(currentNeighborAddressInfo_t *currentNeighb
   xSemaphoreGive(rangingTableSetMutex);
   /*--11添加--*/
 }
+
 
 uint16_t get_tx_rx_min_interval(address_t address)
 {
@@ -632,48 +667,61 @@ int generateRangingMessage(Ranging_Message_t *rangingMessage)
   rangingMessage->header.keep_flying = leaderStateInfo.keepFlying;
   rangingMessage->header.isAlreadyTakeoff = MYisAlreadyTakeoff;
   // 如果是leader则进行阶段控制
-  stage = ZERO_STAGE;
-  if (MY_UWB_ADDRESS == leaderStateInfo.address && leaderStateInfo.keepFlying)
+  if(MY_UWB_ADDRESS == leaderStateInfo.address && uwbGetUartInfo(&aideck_data.steer,&aideck_data.coll,&aideck_data.sign))
   {
-    // 分阶段控制
-    tickInterval = xTaskGetTickCount() - leaderStateInfo.keepFlyingTrueTick;
-    // 所有邻居起飞判断
-    uint32_t convergeTick = 15000; // 收敛时间10s
-    uint32_t followTick = 10000;   // 跟随时间10s
-    uint32_t converAndFollowTick = convergeTick + followTick;
-    uint32_t maintainTick = 5000;                                            // 每转一次需要的时间
-    uint32_t rotationNums_3Stage = 4;                                        // 第3阶段旋转次数
-    uint32_t rotationNums_4Stage = 5;                                        // 第4阶段旋转次数
-    uint32_t rotationTick_3Stage = maintainTick * (rotationNums_3Stage + 1); // 旋转总时间
-    uint32_t rotationTick_4Stage = maintainTick * (rotationNums_4Stage);     // 旋转总时间
-    int8_t stageStartPoint_4 = 68;                                           // 第4阶段起始stage值，因为阶段的区分靠的是stage的值域,(-30,30)为第三阶段
-    if (tickInterval < convergeTick)
-    {
-      stage = FIRST_STAGE; // 0阶段，[0，收敛时间 )，做随机运动
-    }
-    else if (tickInterval >= convergeTick && tickInterval < converAndFollowTick)
-    {
-      stage = SECOND_STAGE; // 1阶段，[收敛时间，收敛+跟随时间 )，做跟随运动
-    }
-    else if (tickInterval < converAndFollowTick + rotationTick_3Stage)
-    {
-      stage = (tickInterval - converAndFollowTick) / maintainTick; // 计算旋转次数
-      stage = stage - 1;
-    }
-    else if (tickInterval >= converAndFollowTick + rotationTick_3Stage && tickInterval < converAndFollowTick + rotationTick_3Stage + rotationTick_4Stage)
-    {
-      stage = (tickInterval - converAndFollowTick - rotationTick_3Stage) / maintainTick;
-      stage = stageStartPoint_4 - stage;
-    }
-    else
-    {
-      stage = LAND_STAGE;
-    }
-    // DEBUG_PRINT("%d\n",stage)
-    leaderStateInfo.stage = stage; // 这里设置leader的stage
-
-    // DEBUG_PRINT("--send--%d\n",rangingMessage->header.stage);
+    rangingMessage->header.steer = aideck_data.steer;
+    rangingMessage->header.coll = aideck_data.coll;
+    rangingMessage->header.sign = aideck_data.sign;
   }
+  else if(MY_UWB_ADDRESS != leaderStateInfo.address)
+  {
+    rangingMessage->header.steer = neighborStateInfo.steer;
+    rangingMessage->header.coll = neighborStateInfo.coll;
+    rangingMessage->header.sign = neighborStateInfo.sign;
+  }
+  // DEBUG_PRINT("gen0-steer:%.2f,coll:%.2f,sign:%.2f\n",rangingMessage->header.steer,rangingMessage->header.coll,rangingMessage->header.sign);
+  // stage = ZERO_STAGE;
+  // if (MY_UWB_ADDRESS == leaderStateInfo.address && leaderStateInfo.keepFlying)
+  // {
+  //   // 分阶段控制
+  //   tickInterval = xTaskGetTickCount() - leaderStateInfo.keepFlyingTrueTick;
+  //   // 所有邻居起飞判断
+  //   uint32_t convergeTick = 15000; // 收敛时间10s
+  //   uint32_t followTick = 10000;   // 跟随时间10s
+  //   uint32_t converAndFollowTick = convergeTick + followTick;
+  //   uint32_t maintainTick = 5000;                                            // 每转一次需要的时间
+  //   uint32_t rotationNums_3Stage = 4;                                        // 第3阶段旋转次数
+  //   uint32_t rotationNums_4Stage = 5;                                        // 第4阶段旋转次数
+  //   uint32_t rotationTick_3Stage = maintainTick * (rotationNums_3Stage + 1); // 旋转总时间
+  //   uint32_t rotationTick_4Stage = maintainTick * (rotationNums_4Stage);     // 旋转总时间
+  //   int8_t stageStartPoint_4 = 68;                                           // 第4阶段起始stage值，因为阶段的区分靠的是stage的值域,(-30,30)为第三阶段
+  //   if (tickInterval < convergeTick)
+  //   {
+  //     stage = FIRST_STAGE; // 0阶段，[0，收敛时间 )，做随机运动
+  //   }
+  //   else if (tickInterval >= convergeTick && tickInterval < converAndFollowTick)
+  //   {
+  //     stage = SECOND_STAGE; // 1阶段，[收敛时间，收敛+跟随时间 )，做跟随运动
+  //   }
+  //   else if (tickInterval < converAndFollowTick + rotationTick_3Stage)
+  //   {
+  //     stage = (tickInterval - converAndFollowTick) / maintainTick; // 计算旋转次数
+  //     stage = stage - 1;
+  //   }
+  //   else if (tickInterval >= converAndFollowTick + rotationTick_3Stage && tickInterval < converAndFollowTick + rotationTick_3Stage + rotationTick_4Stage)
+  //   {
+  //     stage = (tickInterval - converAndFollowTick - rotationTick_3Stage) / maintainTick;
+  //     stage = stageStartPoint_4 - stage;
+  //   }
+  //   else
+  //   {
+  //     stage = LAND_STAGE;
+  //   }
+  //   // DEBUG_PRINT("%d\n",stage)
+  //   leaderStateInfo.stage = stage; // 这里设置leader的stage
+
+  //   // DEBUG_PRINT("--send--%d\n",rangingMessage->header.stage);
+  // }
   rangingMessage->header.stage = leaderStateInfo.stage; // 这里传输stage，因为在设置setNeighborStateInfo()函数中只会用leader无人机的stage的值
   /*--9添加--*/
   return rangingMessage->header.msgLength;

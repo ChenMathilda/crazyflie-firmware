@@ -55,6 +55,11 @@ typedef struct
     bool isNewAdd[RANGING_TABLE_SIZE + 1];            // 这个邻居是否是新加入的
     bool isNewAddUsed[RANGING_TABLE_SIZE + 1];
     bool isAlreadyTakeoff[RANGING_TABLE_SIZE + 1];
+    //for AI///////////////
+    float steer;
+    float coll;
+    float sign;
+    //for AI///////////////
     /* 用于辅助判断这个邻居是否是新加入的（注意：这里的'新加入'指的是，
     是相对于EKF来说的，主要用于在EKF中判断是否需要执行初始化工作）*/
 } neighborStateInfo_t; /*存储正在和本无人机进行通信的邻居的所有信息（用于EKF）*/
@@ -102,6 +107,7 @@ bool getOrSetKeepflying(uint16_t RobIDfromControl, bool keep_flying);
 
 /*get正在和本无人机进行通信的邻居地址信息，供外部调用*/
 void getCurrentNeighborAddressInfo_t(currentNeighborAddressInfo_t *currentNeighborAddressInfo);
+uint8_t get0AIStateInfo(float *steer,float *coll,float *sign);
 
 /*--3添加--*/
 #endif
